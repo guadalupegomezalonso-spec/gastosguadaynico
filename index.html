@@ -1,0 +1,1444 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hogar Guada & Nico - Finanzas</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Carga de la Base de Datos Firebase -->
+    <script type="module">
+      import { initializeApp, getApps, getApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+      import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+      import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+      window.Firebase = {
+        initializeApp, getApps, getApp, getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged,
+        getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, setDoc
+      };
+    </script>
+</head>
+<body>
+    <!-- Pantalla de carga nativa -->
+    <div id="root">
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif; color: #0f766e; background-color: #f8fafc;">
+          <svg style="width: 50px; height: 50px; animation: spin 1s linear infinite;" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" stroke-opacity="0.25"></circle>
+            <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <h2 style="margin-top: 20px; font-weight: bold;">Cargando Finanzas...</h2>
+          <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
+      </div>
+    </div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect } = React;
+
+        // ESTRUCTURA DE CATEGORÍAS Y CUENTAS
+        const PAYMENT_METHODS = ['Efectivo', 'Cuenta Guada', 'Cuenta Nico'];
+        const SAVINGS_ACCOUNTS = ['USD CASA', 'USD BANCO GUADA', 'USD BANCO NICO', 'IOL GUADA', 'IOL GUADA USD', 'IOL NICO', 'IOL NICO USD', 'PESOS EFECTIVO'];
+        const SAVINGS_BOXES = [
+          { id: 'USD CASA', title: 'USD CASA', accounts: ['USD CASA'] },
+          { id: 'USD BANCO GUADA', title: 'USD BANCO GUADA', accounts: ['USD BANCO GUADA'] },
+          { id: 'USD BANCO NICO', title: 'USD BANCO NICO', accounts: ['USD BANCO NICO'] },
+          { id: 'IOL GUADA', title: 'IOL GUADA', accounts: ['IOL GUADA', 'IOL GUADA USD'] },
+          { id: 'IOL NICO', title: 'IOL NICO', accounts: ['IOL NICO', 'IOL NICO USD'] },
+          { id: 'PESOS EFECTIVO', title: 'PESOS EFECTIVO', accounts: ['PESOS EFECTIVO'] }
+        ];
+        const formatAccountName = (acc) => {
+          if (acc === 'IOL GUADA') return 'IOL GUADA (ARS)';
+          if (acc === 'IOL NICO') return 'IOL NICO (ARS)';
+          if (acc === 'IOL GUADA USD') return 'IOL GUADA (USD)';
+          if (acc === 'IOL NICO USD') return 'IOL NICO (USD)';
+          return acc;
+        };
+
+        const STRUCTURE = {
+          ingreso: ['Sueldo Nico', 'Sueldo Guada'],
+          pago_tarjetas: ['Tarjeta Nico', 'Tarjeta Guada', 'Naranja Nico', 'Naranja Guada'],
+          gastos_casa: ['Expensas casa', 'Expensas terreno', 'Luz', 'Agua', 'Mirta', 'Piletero', 'Jardinero', 'Crédito auto'],
+          gastos_diarios: ['Verdulería', 'Carnicería', 'Super/almacén', 'Delivery', 'Nafta', 'Comidas afuera/salidas', 'Salidas con amigos/flia', 'Otros'],
+          ahorro: ['Envío a Bóveda']
+        };
+        const TYPE_LABELS = { ingreso: 'Ingreso', pago_tarjetas: 'Pago tarjetas', gastos_casa: 'Pagos casa', gastos_diarios: 'Gastos diarios', ahorro: 'Ahorro / Inversión' };
+
+        function App() {
+          const [activeTab, setActiveTab] = useState('dashboard');
+          const [transactions, setTransactions] = useState([]);
+          const [savingsTx, setSavingsTx] = useState([]);
+          const [campoTx, setCampoTx] = useState([]);
+          const [budgets, setBudgets] = useState({});
+          
+          const [savingsModal, setSavingsModal] = useState({ isOpen: false, type: 'in', boxId: '', accounts: [], selectedAccount: '' });
+          const [savingsAmount, setSavingsAmount] = useState('');
+          const [savingsReason, setSavingsReason] = useState('');
+          const [historyModal, setHistoryModal] = useState({ isOpen: false, boxId: '', accounts: [] });
+
+          const [transferModal, setTransferModal] = useState(false);
+          const [transferFrom, setTransferFrom] = useState(PAYMENT_METHODS[0]);
+          const [transferTo, setTransferTo] = useState(SAVINGS_ACCOUNTS[0]);
+          const [transferAmountOut, setTransferAmountOut] = useState('');
+          const [transferAmountIn, setTransferAmountIn] = useState('');
+
+          const [reservedCash, setReservedCash] = useState(0); 
+
+          const [type, setType] = useState('gastos_diarios');
+          const [category, setCategory] = useState(STRUCTURE.gastos_diarios[0]);
+          const [amount, setAmount] = useState('');
+          const [paymentMethod, setPaymentMethod] = useState(PAYMENT_METHODS[0]);
+          const [description, setDescription] = useState('');
+          const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+          const [person, setPerson] = useState('Guada');
+
+          // Estados Préstamo Campo
+          const [campoType, setCampoType] = useState('le_presto');
+          const [campoAmount, setCampoAmount] = useState('');
+          const [campoMethod, setCampoMethod] = useState(PAYMENT_METHODS[0]);
+          const [campoDesc, setCampoDesc] = useState('');
+          const [campoDate, setCampoDate] = useState(new Date().toISOString().split('T')[0]);
+
+          const currentMonthString = new Date().toISOString().substring(0, 7);
+          const [filterMonth, setFilterMonth] = useState(currentMonthString);
+          const [filterType, setFilterType] = useState('all');
+          
+          const [errorMsg, setErrorMsg] = useState('');
+          const [user, setUser] = useState(null);
+          const [isDbConnected, setIsDbConnected] = useState(false);
+
+          // Estado para Edición de Presupuestos
+          const [editingBudget, setEditingBudget] = useState(false);
+          const [budgetForm, setBudgetForm] = useState({ pago_tarjetas: 0, gastos_casa: 0, gastos_diarios: 0 });
+
+          // CONFIGURACIÓN DE FIREBASE
+          const dbConfig = useMemo(() => {
+            if (!window.Firebase) return null;
+            const { initializeApp, getApps, getApp, getAuth, getFirestore } = window.Firebase;
+            let config = {};
+            if (typeof __firebase_config !== 'undefined') {
+                config = JSON.parse(__firebase_config);
+            } else {
+                config = {
+                    apiKey: "AIzaSyDYDrS7HLB0gBV6y4OUwLZW3dinq5BAXrg",
+                    authDomain: "hogarguadanico.firebaseapp.com",
+                    projectId: "hogarguadanico",
+                    storageBucket: "hogarguadanico.firebasestorage.app",
+                    messagingSenderId: "875232852009",
+                    appId: "1:875232852009:web:0ec9e0d07aeba8dab9c438"
+                };
+            }
+            try {
+              const app = getApps().length > 0 ? getApp() : initializeApp(config);
+              return { auth: getAuth(app), db: getFirestore(app) };
+            } catch (e) { return null; }
+          }, []);
+
+          // AUTENTICACIÓN Y LECTURA DE DATOS
+          useEffect(() => {
+            if (!dbConfig) return;
+            const { signInWithCustomToken, signInAnonymously, onAuthStateChanged } = window.Firebase;
+            const initAuth = async () => {
+              try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await signInWithCustomToken(dbConfig.auth, __initial_auth_token);
+                else await signInAnonymously(dbConfig.auth);
+              } catch (e) {}
+            };
+            initAuth();
+            const unsubscribe = onAuthStateChanged(dbConfig.auth, setUser);
+            return () => unsubscribe();
+          }, [dbConfig]);
+
+          useEffect(() => {
+            if (!user || !dbConfig) return;
+            const { collection, onSnapshot } = window.Firebase;
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
+
+            const txRef = collection(dbConfig.db, 'artifacts', appId, 'public', 'data', 'transactions');
+            const savRef = collection(dbConfig.db, 'artifacts', appId, 'public', 'data', 'savings');
+            const camRef = collection(dbConfig.db, 'artifacts', appId, 'public', 'data', 'campo');
+            const budRef = collection(dbConfig.db, 'artifacts', appId, 'public', 'data', 'budgets');
+
+            const unsubTx = onSnapshot(txRef, (snapshot) => {
+              setTransactions(snapshot.docs.map(d => ({id: d.id, ...d.data()})));
+              setIsDbConnected(true);
+            }, (err) => console.error(err));
+
+            const unsubSav = onSnapshot(savRef, (snapshot) => {
+              setSavingsTx(snapshot.docs.map(d => ({id: d.id, ...d.data()})));
+            }, (err) => console.error(err));
+
+            const unsubCam = onSnapshot(camRef, (snapshot) => {
+              setCampoTx(snapshot.docs.map(d => ({id: d.id, ...d.data()})));
+            }, (err) => console.error(err));
+
+            const unsubBud = onSnapshot(budRef, (snapshot) => {
+              const data = {};
+              snapshot.docs.forEach(d => { data[d.id] = d.data(); });
+              setBudgets(data);
+            }, (err) => console.error(err));
+
+            return () => { unsubTx(); unsubSav(); unsubCam(); unsubBud(); };
+          }, [user, dbConfig]);
+
+          useEffect(() => {
+            if (STRUCTURE[type] && !STRUCTURE[type].includes(category)) setCategory(STRUCTURE[type][0]);
+          }, [type, category]);
+
+          useEffect(() => {
+            if (budgets[filterMonth]) setBudgetForm(budgets[filterMonth]);
+            else setBudgetForm({ pago_tarjetas: 0, gastos_casa: 0, gastos_diarios: 0 });
+            setEditingBudget(false);
+          }, [filterMonth, budgets]);
+
+          const showError = (msg) => {
+            setErrorMsg(msg);
+            setTimeout(() => setErrorMsg(''), 4000);
+          }
+
+          const filteredTransactions = useMemo(() => {
+            return transactions.filter(t => {
+              const safeDate = t.date || '';
+              const matchMonth = filterMonth === 'all' || (safeDate && safeDate.substring(0, 7) === filterMonth);
+              const matchType = filterType === 'all' || t.type === filterType;
+              return matchMonth && matchType;
+            }).sort((a, b) => {
+              const diff = new Date(b.date || 0) - new Date(a.date || 0);
+              return diff === 0 ? (b.createdAt || 0) - (a.createdAt || 0) : diff;
+            });
+          }, [transactions, filterMonth, filterType]);
+
+          const sortedSavings = useMemo(() => {
+            return savingsTx.sort((a, b) => {
+              const diff = new Date(b.date || 0) - new Date(a.date || 0);
+              return diff === 0 ? (b.createdAt || 0) - (a.createdAt || 0) : diff;
+            });
+          }, [savingsTx]);
+          
+          const sortedCampo = useMemo(() => {
+            return campoTx.sort((a, b) => {
+              const diff = new Date(b.date || 0) - new Date(a.date || 0);
+              return diff === 0 ? (b.createdAt || 0) - (a.createdAt || 0) : diff;
+            });
+          }, [campoTx]);
+
+          const accountBalances = useMemo(() => {
+            const bals = { 'Efectivo': 0, 'Cuenta Guada': 0, 'Cuenta Nico': 0 };
+            transactions.forEach(t => {
+              const method = t.paymentMethod || 'Efectivo';
+              if (bals[method] === undefined) bals[method] = 0;
+              if (t.type === 'ingreso') bals[method] += Number(t.amount || 0);
+              else bals[method] -= Number(t.amount || 0);
+            });
+            // Impacto de los préstamos del campo en nuestros saldos reales
+            campoTx.forEach(tx => {
+              const method = tx.paymentMethod || 'Efectivo';
+              if (bals[method] === undefined) bals[method] = 0;
+              if (tx.type === 'le_presto') bals[method] -= Number(tx.amount || 0); // Sale plata nuestra
+              else if (tx.type === 'me_presta') bals[method] += Number(tx.amount || 0); // Entra plata a nuestra cuenta
+            });
+            return bals;
+          }, [transactions, campoTx]);
+
+          const totalSaldos = (accountBalances['Cuenta Guada'] || 0) + (accountBalances['Cuenta Nico'] || 0) + (accountBalances['Efectivo'] || 0);
+
+          const campoBalance = useMemo(() => {
+             return campoTx.reduce((acc, tx) => acc + (tx.type === 'le_presto' ? Number(tx.amount) : -Number(tx.amount)), 0);
+          }, [campoTx]);
+
+          const getPrevMonth = (yyyyMM) => {
+              if (!yyyyMM || yyyyMM === 'all') return 'all';
+              const [y, m] = yyyyMM.split('-');
+              let prevM = parseInt(m, 10) - 1;
+              let prevY = parseInt(y, 10);
+              if (prevM === 0) { prevM = 12; prevY -= 1; }
+              return `${prevY}-${prevM.toString().padStart(2, '0')}`;
+          };
+
+          const reportStats = useMemo(() => {
+            const totalsByType = { pago_tarjetas: 0, gastos_casa: 0, gastos_diarios: 0, ahorro: 0 };
+            let totalIngresos = 0;
+            let totalGastos = 0;
+            const topDiarios = {};
+
+            const prevMonth = getPrevMonth(filterMonth);
+            const prevTotals = { pago_tarjetas: 0, gastos_casa: 0, gastos_diarios: 0 };
+
+            transactions.forEach(t => {
+              const safeDate = t.date || '';
+              const tMonth = safeDate.substring(0, 7);
+
+              if (filterMonth === 'all' || tMonth === filterMonth) {
+                if (t.type === 'ingreso') totalIngresos += Number(t.amount || 0);
+                else {
+                  const typeSafe = t.type || 'gastos_diarios';
+                  totalsByType[typeSafe] = (totalsByType[typeSafe] || 0) + Number(t.amount || 0);
+                  if (typeSafe !== 'ahorro') totalGastos += Number(t.amount || 0);
+                  if (typeSafe === 'gastos_diarios') topDiarios[t.category] = (topDiarios[t.category] || 0) + Number(t.amount || 0);
+                }
+              }
+
+              if (filterMonth !== 'all' && tMonth === prevMonth) {
+                if (t.type === 'pago_tarjetas' || t.type === 'gastos_casa' || t.type === 'gastos_diarios') {
+                    prevTotals[t.type] += Number(t.amount || 0);
+                }
+              }
+            });
+
+            // Solo 8 items en top fugas
+            const sortedDiarios = Object.entries(topDiarios).sort(([, a], [, b]) => b - a).slice(0, 8);
+            const capacityToSave = totalIngresos - totalGastos;
+            
+            return { totalIngresos, totalGastos, totalsByType, sortedDiarios, capacityToSave, prevTotals };
+          }, [transactions, filterMonth]);
+
+          const mandatoryChecklist = useMemo(() => {
+            const checklist = {
+              'Tarjeta Nico': false, 'Tarjeta Guada': false, 'Naranja Nico': false, 'Naranja Guada': false,
+              'Expensas casa': false, 'Expensas terreno': false, 'Luz': false, 'Agua': false, 'Crédito auto': false
+            };
+            filteredTransactions.forEach(t => {
+              if (t.category && checklist[t.category] !== undefined) checklist[t.category] = true;
+            });
+            return checklist;
+          }, [filteredTransactions]);
+
+          const savingsBalances = useMemo(() => {
+            const balances = {};
+            SAVINGS_ACCOUNTS.forEach(acc => balances[acc] = 0);
+            savingsTx.forEach(tx => {
+              const account = tx.account || 'PESOS EFECTIVO';
+              if (balances[account] === undefined) balances[account] = 0;
+              if (tx.type === 'in') balances[account] += Number(tx.amount || 0);
+              else balances[account] -= Number(tx.amount || 0);
+            });
+            return balances;
+          }, [savingsTx]);
+
+          // GUARDADO EN LA NUBE
+          const handleSubmit = async (e) => {
+            e.preventDefault();
+            if (!amount || Number(amount) <= 0) return;
+            if (category === 'Otros' && !description.trim()) { showError("Por favor, detalla en la descripción."); return; }
+
+            const newTx = { type, category, amount: Number(amount), paymentMethod, description, date, person, createdAt: Date.now() };
+
+            if (user && dbConfig) {
+              const { addDoc, collection } = window.Firebase;
+              const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
+              try { await addDoc(collection(dbConfig.db, 'artifacts', appId, 'public', 'data', 'transactions'), newTx);
+              } catch (err) { showError("Hubo un error al guardar en la nube."); }
+            } else { setTransactions([newTx, ...transactions]); }
+            setAmount(''); if (category !== 'Otros') setDescription('');
+          };
+
+          const deleteTransaction = async (id) => {
+            if (user && dbConfig) {
+              const { deleteDoc, doc } = window.Firebase;
+              const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
+              try { await deleteDoc(doc(dbConfig.db, 'artifacts', appId, 'public', 'data', 'transactions', id)); } catch (err) {}
+            } else setTransactions(transactions.filter(t => t.id !== id));
+          };
+
+          const handleCampoSubmit = async (e) => {
+            e.preventDefault();
+            if (!campoAmount || Number(campoAmount) <= 0) return;
+            if (campoType === 'le_presto' && Number(campoAmount) > accountBalances[campoMethod]) {
+                showError(`No tenés suficientes fondos en ${campoMethod} para prestar esa plata.`); return;
+            }
+
+            const newCampo = { type: campoType, amount: Number(campoAmount), paymentMethod: campoMethod, description: campoDesc, date: campoDate, createdAt: Date.now() };
+            if (user && dbConfig) {
+              const { addDoc, collection } = window.Firebase;
+              const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
+              try { await addDoc(collection(dbConfig.db, 'artifacts', appId, 'public', 'data', 'campo'), newCampo);
+              } catch (err) { showError("Hubo un error al guardar en la nube."); }
+            } else { setCampoTx([newCampo, ...campoTx]); }
+            setCampoAmount(''); setCampoDesc('');
+          };
+
+          const deleteCampoTransaction = async (id) => {
+            if (user && dbConfig) {
+              const { deleteDoc, doc } = window.Firebase;
+              const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
+              try { await deleteDoc(doc(dbConfig.db, 'artifacts', appId, 'public', 'data', 'campo', id)); } catch (err) {}
+            } else setCampoTx(campoTx.filter(t => t.id !== id));
+          };
+
+          const handleBudgetSubmit = async () => {
+             if (filterMonth === 'all') return;
+             if (user && dbConfig) {
+                 const { setDoc, doc } = window.Firebase;
+                 const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
+                 try { await setDoc(doc(dbConfig.db, 'artifacts', appId, 'public', 'data', 'budgets', filterMonth), budgetForm); } catch(err) { showError("Error guardando presupuesto"); }
+             } else {
+                 setBudgets({...budgets, [filterMonth]: budgetForm});
+             }
+             setEditingBudget(false);
+          };
+
+          const openSavingsModal = (boxId, type) => {
+            const box = SAVINGS_BOXES.find(b => b.id === boxId);
+            setSavingsModal({ isOpen: true, type, boxId: box.id, accounts: box.accounts, selectedAccount: box.accounts[0] });
+            setSavingsAmount(''); setSavingsReason('');
+          };
+          const closeSavingsModal = () => setSavingsModal({ isOpen: false, type: 'in', boxId: '', accounts: [], selectedAccount: '' });
+          const openHistory = (boxId) => {
+            const box = SAVINGS_BOXES.find(b => b.id === boxId);
+            setHistoryModal({ isOpen: true, boxId: box.id, accounts: box.accounts });
+          };
+          const closeHistory = () => setHistoryModal({ isOpen: false, boxId: '', accounts: [] });
+
+          const handleSavingsSubmit = async (e) => {
+            e.preventDefault();
+            const numAmount = Number(savingsAmount);
+            if (!numAmount || numAmount <= 0) return;
+            const targetAccount = savingsModal.selectedAccount;
+            if (savingsModal.type === 'out') {
+              if (numAmount > savingsBalances[targetAccount]) { showError("¡No tienes suficientes fondos en esta cuenta!"); return; }
+              if (!savingsReason.trim()) { showError("Por favor, ingresa el motivo de la extracción."); return; }
+            }
+            const newSavingsTx = {
+              date: new Date().toISOString().split('T')[0], account: targetAccount, type: savingsModal.type,
+              amount: numAmount, reason: savingsReason || (savingsModal.type === 'in' ? 'Ingreso a cuenta' : 'Extracción'), createdAt: Date.now()
+            };
+            if (user && dbConfig) {
+              const { addDoc, collection } = window.Firebase;
+              const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
+              try { await addDoc(collection(dbConfig.db, 'artifacts', appId, 'public', 'data', 'savings'), newSavingsTx);
+              } catch (err) { showError("Error al guardar ahorro en la nube."); }
+            } else setSavingsTx([newSavingsTx, ...savingsTx]);
+            closeSavingsModal();
+          };
+
+          const deleteSavingsTransaction = async (id) => {
+            if (user && dbConfig) {
+              const { deleteDoc, doc } = window.Firebase;
+              const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
+              await deleteDoc(doc(dbConfig.db, 'artifacts', appId, 'public', 'data', 'savings', id));
+            } else setSavingsTx(savingsTx.filter(t => t.id !== id));
+          };
+
+          const openTransferModal = () => {
+            setTransferModal(true); setTransferAmountOut(''); setTransferAmountIn('');
+            setTransferFrom(PAYMENT_METHODS[0]); setTransferTo(SAVINGS_ACCOUNTS[0]);
+          };
+
+          const handleTransferSubmit = async (e) => {
+            e.preventDefault();
+            if (!transferAmountOut || !transferAmountIn) return;
+            if (Number(transferAmountOut) > accountBalances[transferFrom]) { showError(`No tienes suficientes fondos.`); return; }
+            const newTx = { type: 'ahorro', category: 'Envío a Bóveda', amount: Number(transferAmountOut), paymentMethod: transferFrom, description: `Derivación a ${transferTo}`, date: new Date().toISOString().split('T')[0], person: 'Ambos', createdAt: Date.now() };
+            const newSav = { date: new Date().toISOString().split('T')[0], account: transferTo, type: 'in', amount: Number(transferAmountIn), reason: `Transferencia desde ${transferFrom}`, createdAt: Date.now() + 1 };
+            if (user && dbConfig) {
+              const { addDoc, collection } = window.Firebase;
+              const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
+              try {
+                  await addDoc(collection(dbConfig.db, 'artifacts', appId, 'public', 'data', 'transactions'), newTx);
+                  await addDoc(collection(dbConfig.db, 'artifacts', appId, 'public', 'data', 'savings'), newSav);
+              } catch (err) { showError("Hubo un error."); }
+            } else { setTransactions([newTx, ...transactions]); setSavingsTx([newSav, ...savingsTx]); }
+            setTransferModal(false);
+          };
+
+          const formatARS = (num) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(num || 0);
+          const formatUSD = (num) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(num || 0);
+          const getCurrencyFormatter = (accountName) => accountName.includes('USD') ? formatUSD : formatARS;
+          const isUSD = (accountName) => accountName.includes('USD');
+          
+          const calcDiff = (curr, prev) => {
+            if (prev === 0) return curr > 0 ? '+100%' : '0%';
+            const diff = ((curr - prev) / prev) * 100;
+            return `${diff > 0 ? '+' : ''}${diff.toFixed(1)}%`;
+          };
+
+          const getCalendarLink = () => {
+            const now = new Date(); now.setHours(23, 0, 0, 0); 
+            const end = new Date(now.getTime() + 15 * 60000); 
+            const pad = (n) => n.toString().padStart(2, '0');
+            const formatLocal = (d) => `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+            const dates = `${formatLocal(now)}/${formatLocal(end)}`;
+            return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=Registrar+Gastos+Diarios+%F0%9F%92%B8&details=Entrar+a+la+app+para+cargar+los+gastos+del+d%C3%ADa%3A+https%3A%2F%2Fresonant-kulfi-5e9674.netlify.app&dates=${dates}&recur=RRULE:FREQ=DAILY`;
+          };
+          
+          // Generar meses (incluyendo el mes que viene para poder setear presupuesto futuro)
+          const nextMonthObj = new Date(); nextMonthObj.setMonth(nextMonthObj.getMonth() + 1);
+          const nextMonthString = nextMonthObj.toISOString().substring(0, 7);
+          const availableMonths = [...new Set(transactions.map(t => t.date ? t.date.substring(0, 7) : null).filter(Boolean))];
+          if (!availableMonths.includes(currentMonthString)) availableMonths.push(currentMonthString);
+          if (!availableMonths.includes(nextMonthString)) availableMonths.push(nextMonthString);
+          availableMonths.sort().reverse();
+
+          const getTypeIcon = (txType) => {
+            if (txType === 'ingreso' || txType === 'me_presta') return <i className="fas fa-arrow-trend-up text-xl opacity-80"></i>;
+            if (txType === 'pago_tarjetas') return <i className="fas fa-credit-card text-xl opacity-80"></i>;
+            if (txType === 'gastos_casa') return <i className="fas fa-home text-xl opacity-80"></i>;
+            if (txType === 'ahorro') return <i className="fas fa-piggy-bank text-xl opacity-80"></i>;
+            if (txType === 'le_presto') return <i className="fas fa-tractor text-xl opacity-80"></i>;
+            return <i className="fas fa-bag-shopping text-xl opacity-80"></i>;
+          };
+
+          const getTypeColor = (txType) => {
+            if (txType === 'ingreso' || txType === 'me_presta') return 'bg-emerald-100 text-emerald-600';
+            if (txType === 'pago_tarjetas') return 'bg-purple-100 text-purple-600';
+            if (txType === 'gastos_casa') return 'bg-blue-100 text-blue-600';
+            if (txType === 'ahorro') return 'bg-teal-100 text-teal-600';
+            if (txType === 'le_presto') return 'bg-amber-100 text-amber-600';
+            return 'bg-rose-100 text-rose-600';
+          };
+
+          return (
+            <div className="min-h-screen bg-slate-50 font-sans text-slate-800 pb-12 relative">
+              
+              {errorMsg && (
+                <div className="fixed top-4 left-1/2 transform -translate-x-1/2 bg-rose-600 text-white px-6 py-3 rounded-full shadow-lg font-bold text-sm z-50 flex items-center gap-2 animate-in slide-in-from-top-4">
+                  <i className="fas fa-circle-exclamation"></i> {errorMsg}
+                </div>
+              )}
+
+              <header className="bg-teal-700 text-white p-6 shadow-md">
+                <div className="max-w-5xl mx-auto">
+                  <div className="flex flex-col lg:flex-row justify-between items-center gap-4">
+                    <div className="flex items-center gap-3 w-full lg:w-auto justify-center lg:justify-start">
+                      <i className="fas fa-home text-3xl text-teal-200"></i>
+                      <div>
+                        <h1 className="text-2xl font-bold">Hogar Guada & Nico</h1>
+                        <p className="text-teal-100 text-sm flex items-center gap-1">
+                          <i className={`fas fa-circle text-[8px] ${isDbConnected ? 'text-emerald-400' : 'text-amber-400'}`}></i> 
+                          {isDbConnected ? 'Sincronizado en la nube' : 'Modo Local'}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex bg-teal-800 rounded-xl p-1 shadow-inner overflow-x-auto w-full lg:w-auto">
+                      <button onClick={() => setActiveTab('dashboard')} className={`flex-1 lg:flex-none flex justify-center items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'dashboard' ? 'bg-white text-teal-900 shadow-sm' : 'text-teal-100 hover:text-white'}`}>
+                        <i className="fas fa-pen-to-square"></i> Carga Diaria
+                      </button>
+                      <button onClick={() => setActiveTab('reporte')} className={`flex-1 lg:flex-none flex justify-center items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'reporte' ? 'bg-white text-teal-900 shadow-sm' : 'text-teal-100 hover:text-white'}`}>
+                        <i className="fas fa-chart-pie"></i> Análisis Mensual
+                      </button>
+                      <button onClick={() => setActiveTab('ahorros')} className={`flex-1 lg:flex-none flex justify-center items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'ahorros' ? 'bg-white text-teal-900 shadow-sm' : 'text-teal-100 hover:text-white'}`}>
+                        <i className="fas fa-building-columns"></i> Mis Ahorros
+                      </button>
+                      <button onClick={() => setActiveTab('campo')} className={`flex-1 lg:flex-none flex justify-center items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${activeTab === 'campo' ? 'bg-amber-100 text-amber-900 shadow-sm' : 'text-teal-100 hover:text-white'}`}>
+                        <i className="fas fa-tractor"></i> Préstamos Campo
+                      </button>
+                    </div>
+                  </div>
+
+                  {activeTab !== 'ahorros' && activeTab !== 'campo' && (
+                    <div className="mt-6 flex items-center justify-end gap-2 bg-teal-800/50 w-fit ml-auto px-4 py-2 rounded-full text-sm font-medium border border-teal-600">
+                      <i className="fas fa-calendar-alt text-teal-200"></i>
+                      <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="bg-transparent border-none outline-none cursor-pointer text-white font-bold">
+                        <option value="all" className="text-slate-800">Todo el historial</option>
+                        {availableMonths.map(m => <option key={m} value={m} className="text-slate-800">{m}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              </header>
+
+              <main className="max-w-5xl mx-auto p-4 mt-6">
+                
+                {/* -------------------- REPORTE MENSUAL -------------------- */}
+                {activeTab === 'reporte' && (
+                  <div className="space-y-6 animate-in fade-in duration-500">
+                    <div className="mb-6">
+                      <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                        <i className="fas fa-chart-pie text-teal-600"></i> Informe del Mes
+                      </h2>
+                      <p className="text-slate-500 text-sm">Resumen inteligente de tus ingresos, gastos y presupuestos en {filterMonth === 'all' ? 'todo el historial' : filterMonth}.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      {/* INGRESOS */}
+                      <div className="bg-emerald-50 rounded-2xl p-6 shadow-sm border border-emerald-100 flex flex-col justify-between">
+                        <div>
+                          <div className="flex justify-between items-start mb-2">
+                            <span className="font-bold text-emerald-800 uppercase tracking-wider text-xs">Ingresos del Mes</span>
+                            <i className="fas fa-arrow-trend-up text-xl text-emerald-400"></i>
+                          </div>
+                          <span className="text-4xl font-black block text-emerald-700 mb-1">{formatARS(reportStats.totalIngresos)}</span>
+                          <p className="text-sm text-emerald-600/80">Todo el dinero que ingresó en este período.</p>
+                        </div>
+                      </div>
+
+                      {/* GASTOS */}
+                      <div className="bg-rose-50 rounded-2xl p-6 shadow-sm border border-rose-100 flex flex-col justify-between">
+                        <div>
+                          <div className="flex justify-between items-start mb-2">
+                            <span className="font-bold text-rose-800 uppercase tracking-wider text-xs">Gastos del Mes</span>
+                            <i className="fas fa-arrow-trend-down text-xl text-rose-400"></i>
+                          </div>
+                          <span className="text-4xl font-black block text-rose-700 mb-1">{formatARS(reportStats.totalGastos)}</span>
+                          <p className="text-sm text-rose-600/80">Suma total de pagos fijos, tarjetas y diarios.</p>
+                        </div>
+                      </div>
+
+                      {/* AHORRO SUGERIDO */}
+                      <div className="bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl p-6 text-white shadow-sm flex flex-col justify-between relative overflow-hidden">
+                        <div className="absolute right-0 top-0 opacity-10 p-4"><i className="fas fa-piggy-bank text-6xl"></i></div>
+                        <div className="relative z-10">
+                          <div className="flex justify-between items-start mb-2">
+                            <span className="font-bold text-indigo-100 uppercase tracking-wider text-xs">Capacidad de Ahorro</span>
+                          </div>
+                          <span className="text-4xl font-black block mb-1">{formatARS(reportStats.capacityToSave)}</span>
+                          <p className="text-sm text-indigo-100">Dinero limpio que sobró este mes.</p>
+                        </div>
+                        <div className="relative z-10 mt-4 pt-4 border-t border-indigo-400/30">
+                           {reportStats.capacityToSave > 0 ? (
+                            <span className="text-sm font-bold flex items-center gap-1 text-emerald-300"><i className="fas fa-check-circle"></i> ¡Tienen margen!</span>
+                           ) : (
+                            <span className="text-sm font-bold flex items-center gap-1 text-rose-300"><i className="fas fa-triangle-exclamation"></i> En rojo / cero</span>
+                           )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      
+                      {/* COLUMNA IZQUIERDA: DISTRIBUCIÓN */}
+                      <div className="lg:col-span-1">
+                        {/* ESTRUCTURA DEL GASTO (%) */}
+                        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 h-full">
+                          <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-6 flex items-center gap-2">
+                            <i className="fas fa-chart-pie text-blue-500"></i> Distribución del Gasto
+                          </h3>
+                          <div className="space-y-5">
+                            {[
+                              { key: 'pago_tarjetas', label: 'Pago Tarjetas', color: 'purple' },
+                              { key: 'gastos_casa', label: 'Pagos casa', color: 'blue' },
+                              { key: 'gastos_diarios', label: 'Gastos Diarios', color: 'rose' }
+                            ].map(cat => {
+                              const amt = reportStats.totalsByType[cat.key] || 0;
+                              const pct = reportStats.totalGastos > 0 ? Math.round((amt / reportStats.totalGastos) * 100) : 0;
+                              return (
+                                <div key={cat.key}>
+                                  <div className="flex justify-between items-end mb-1">
+                                    <span className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                                      <i className={`fas ${cat.key === 'pago_tarjetas' ? 'fa-credit-card text-purple-500' : cat.key === 'gastos_casa' ? 'fa-home text-blue-500' : 'fa-bag-shopping text-rose-500'}`}></i> {cat.label}
+                                    </span>
+                                    <div className="text-right">
+                                      <span className="text-sm font-black text-slate-800">{pct}%</span>
+                                    </div>
+                                  </div>
+                                  <div className="w-full bg-slate-100 rounded-full h-2.5 mb-1">
+                                    <div className={`h-2.5 rounded-full bg-${cat.color}-500`} style={{ width: `${pct}%` }}></div>
+                                  </div>
+                                  <div className="text-right">
+                                     <span className="text-xs font-bold text-slate-400">{formatARS(amt)}</span>
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* COLUMNA DERECHA: PRESUPUESTO Y COMPARATIVA */}
+                      <div className="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-slate-100 h-fit">
+                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                          <div>
+                            <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                              <i className="fas fa-bullseye text-indigo-500"></i> Presupuesto & Comparativa
+                            </h3>
+                            <p className="text-xs text-slate-500 mt-1">Cómo venís contra tu plan y contra el mes pasado.</p>
+                          </div>
+                          {filterMonth !== 'all' && (
+                            <button onClick={() => setEditingBudget(!editingBudget)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">
+                              {editingBudget ? 'Cancelar Edición' : 'Editar Presupuesto'}
+                            </button>
+                          )}
+                        </div>
+
+                        {filterMonth === 'all' ? (
+                          <div className="py-8 text-center text-slate-400 text-sm">Selecciona un mes específico en el filtro de arriba para habilitar la planificación de presupuestos y comparar meses.</div>
+                        ) : editingBudget ? (
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4">
+                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-1"><i className="fas fa-credit-card"></i> Tarjetas</label>
+                                    <input 
+                                      type="text" 
+                                      inputMode="numeric"
+                                      value={budgetForm.pago_tarjetas ? Number(budgetForm.pago_tarjetas).toLocaleString('es-AR') : ''} 
+                                      onChange={e => setBudgetForm({...budgetForm, pago_tarjetas: Number(e.target.value.replace(/\D/g, ''))})} 
+                                      className="w-full p-2 border rounded focus:ring-2 outline-none font-bold" 
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-1"><i className="fas fa-home"></i> Casa</label>
+                                    <input 
+                                      type="text" 
+                                      inputMode="numeric"
+                                      value={budgetForm.gastos_casa ? Number(budgetForm.gastos_casa).toLocaleString('es-AR') : ''} 
+                                      onChange={e => setBudgetForm({...budgetForm, gastos_casa: Number(e.target.value.replace(/\D/g, ''))})} 
+                                      className="w-full p-2 border rounded focus:ring-2 outline-none font-bold" 
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-500 mb-1"><i className="fas fa-coffee"></i> Diarios</label>
+                                    <input 
+                                      type="text" 
+                                      inputMode="numeric"
+                                      value={budgetForm.gastos_diarios ? Number(budgetForm.gastos_diarios).toLocaleString('es-AR') : ''} 
+                                      onChange={e => setBudgetForm({...budgetForm, gastos_diarios: Number(e.target.value.replace(/\D/g, ''))})} 
+                                      className="w-full p-2 border rounded focus:ring-2 outline-none font-bold" 
+                                    />
+                                </div>
+                             </div>
+                             <button onClick={handleBudgetSubmit} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-lg">Guardar Presupuesto</button>
+                          </div>
+                        ) : (
+                          <div className="space-y-6">
+                            {[
+                              { key: 'pago_tarjetas', label: 'Pago Tarjetas', icon: 'fa-credit-card', color: 'purple' },
+                              { key: 'gastos_casa', label: 'Pagos casa', icon: 'fa-home', color: 'blue' },
+                              { key: 'gastos_diarios', label: 'Gastos Diarios', icon: 'fa-bag-shopping', color: 'rose' }
+                            ].map(cat => {
+                               const actual = reportStats.totalsByType[cat.key];
+                               const presu = budgetForm[cat.key] || 0;
+                               const prev = reportStats.prevTotals[cat.key];
+                               const pct = presu > 0 ? Math.min(Math.round((actual / presu) * 100), 100) : 0;
+                               const over = presu > 0 && actual > presu;
+                               const trend = calcDiff(actual, prev);
+                               const isUp = actual > prev;
+
+                               return (
+                                 <div key={cat.key}>
+                                    <div className="flex justify-between items-end mb-1">
+                                      <span className="text-sm font-bold text-slate-700 flex items-center gap-2"><i className={`fas ${cat.icon} text-${cat.color}-500`}></i> {cat.label}</span>
+                                      <div className="text-right">
+                                        <span className="text-sm font-black text-slate-800">{formatARS(actual)}</span>
+                                        <span className="text-xs font-bold text-slate-400 ml-1">/ {formatARS(presu)}</span>
+                                      </div>
+                                    </div>
+                                    <div className="w-full bg-slate-100 rounded-full h-3 relative">
+                                      <div className={`h-3 rounded-full ${over ? 'bg-rose-500' : `bg-${cat.color}-500`}`} style={{ width: `${pct}%` }}></div>
+                                    </div>
+                                    <div className="flex justify-between items-center mt-1">
+                                        <span className="text-[10px] font-bold text-slate-500">Mes anterior: {formatARS(prev)}</span>
+                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isUp ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                           {isUp ? <i className="fas fa-arrow-up"></i> : <i className="fas fa-arrow-down"></i>} {trend}
+                                        </span>
+                                    </div>
+                                 </div>
+                               )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* TOP FUGAS - AHORA OCUPA TODO EL ANCHO */}
+                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+                      <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-6 flex items-center gap-2">
+                        <i className="fas fa-magnifying-glass-dollar text-rose-500"></i> Top Fugas Diarias
+                      </h3>
+                      <p className="text-xs text-slate-500 mb-6">Las 8 categorías de "Gastos Diarios" que más consumieron este mes.</p>
+                      
+                      {reportStats.sortedDiarios.length === 0 ? (
+                        <div className="text-center text-slate-400 py-6">No hay gastos diarios.</div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6">
+                          {reportStats.sortedDiarios.map(([cat, amount], index) => {
+                            const pct = reportStats.totalsByType.gastos_diarios > 0 ? Math.round((amount / reportStats.totalsByType.gastos_diarios) * 100) : 0;
+                            return (
+                              <div key={cat} className="flex items-center gap-4">
+                                <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center font-bold text-xs shrink-0">#{index + 1}</div>
+                                <div className="flex-1">
+                                  <div className="flex justify-between text-sm mb-1">
+                                    <span className="font-bold text-slate-700">{cat}</span>
+                                    <div className="text-right">
+                                       <span className="font-black text-rose-600">{formatARS(amount)}</span>
+                                       <span className="text-xs font-bold text-rose-400 ml-1">({pct}%)</span>
+                                    </div>
+                                  </div>
+                                  <div className="w-full bg-slate-100 rounded-full h-1.5">
+                                    <div className="bg-rose-400 h-1.5 rounded-full" style={{ width: `${pct}%` }}></div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* -------------------- MIS AHORROS -------------------- */}
+                {activeTab === 'ahorros' && (
+                  <div className="space-y-8 animate-in fade-in duration-500">
+                    <div className="mb-2">
+                      <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                        <i className="fas fa-building-columns text-2xl text-emerald-600"></i> Bóveda de Ahorros
+                      </h2>
+                      <p className="text-slate-500 text-sm">Gestiona tus ahorros disponibles distribuidos en tus diferentes cuentas.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {SAVINGS_BOXES.map(box => {
+                        const isDual = box.accounts.length > 1;
+                        const mainIsDollar = isUSD(box.accounts[0]);
+                        const iconStyle = isDual || mainIsDollar ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700';
+
+                        return (
+                          <div key={box.id} className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 flex flex-col justify-between group hover:border-emerald-300 transition-colors">
+                            <div className="flex justify-between items-start mb-6">
+                              <div className="flex items-center gap-2">
+                                <div className={`p-2 rounded-lg ${iconStyle}`}>
+                                  <i className="fas fa-piggy-bank text-xl"></i>
+                                </div>
+                                <h3 className="font-bold text-slate-700 text-sm">{box.title}</h3>
+                              </div>
+                              <button 
+                                onClick={() => openHistory(box.id)}
+                                className="text-slate-400 hover:text-teal-600 transition-colors p-2 -mr-2 -mt-2 rounded-full hover:bg-slate-50"
+                                title="Ver historial de esta cuenta"
+                              >
+                                <i className="fas fa-clock-rotate-left text-lg"></i>
+                              </button>
+                            </div>
+                            
+                            <div className="mb-6 space-y-3">
+                              <span className="text-sm text-slate-400 block mb-1">Disponible</span>
+                              {box.accounts.map(acc => (
+                                <div key={acc} className="flex items-center justify-between">
+                                  <span className={`text-2xl font-black ${isUSD(acc) ? 'text-emerald-600' : 'text-blue-600'}`}>
+                                    {getCurrencyFormatter(acc)(savingsBalances[acc] || 0)}
+                                  </span>
+                                  {isDual && <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded">{isUSD(acc) ? 'USD' : 'ARS'}</span>}
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="flex gap-2 border-t border-slate-100 pt-4">
+                              <button 
+                                onClick={() => openSavingsModal(box.id, 'in')}
+                                className="flex-1 flex justify-center items-center gap-2 bg-slate-50 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 py-2 rounded-lg text-sm font-bold border border-slate-200 transition-colors"
+                              >
+                                <i className="fas fa-circle-arrow-down"></i> Agregar
+                              </button>
+                              <button 
+                                onClick={() => openSavingsModal(box.id, 'out')}
+                                className="flex-1 flex justify-center items-center gap-2 bg-slate-50 hover:bg-rose-50 text-slate-600 hover:text-rose-700 py-2 rounded-lg text-sm font-bold border border-slate-200 transition-colors"
+                              >
+                                <i className="fas fa-circle-arrow-up"></i> Retirar
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* -------------------- PRÉSTAMOS CAMPO -------------------- */}
+                {activeTab === 'campo' && (
+                  <div className="space-y-8 animate-in fade-in duration-500">
+                    <div className="mb-2">
+                      <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                        <i className="fas fa-tractor text-amber-600"></i> Cuenta Corriente con el Campo
+                      </h2>
+                      <p className="text-slate-500 text-sm">Registra la plata que le prestás o le pedís al campo. Esto ajusta automáticamente tus saldos en efectivo/cuentas.</p>
+                    </div>
+
+                    <div className="space-y-8">
+                       {/* SALDO CUENTA CORRIENTE */}
+                       <div className={`p-8 rounded-3xl shadow-sm border flex flex-col justify-between text-white ${campoBalance >= 0 ? 'bg-gradient-to-br from-emerald-500 to-teal-600 border-emerald-400' : 'bg-gradient-to-br from-rose-500 to-orange-600 border-rose-400'}`}>
+                          <div className="flex justify-between items-start mb-6">
+                            <span className="font-bold uppercase tracking-wider text-sm">Saldo Cuenta Corriente</span>
+                            <i className="fas fa-scale-balanced text-3xl opacity-80"></i>
+                          </div>
+                          <span className="text-6xl md:text-7xl font-black block mb-6">{formatARS(Math.abs(campoBalance))}</span>
+                          <div className="pt-4 border-t border-white/20 font-bold text-lg">
+                              {campoBalance === 0 && "Están a mano. Saldo 0."}
+                              {campoBalance > 0 && <span className="flex items-center gap-2"><i className="fas fa-arrow-left"></i> El campo les debe plata a ustedes.</span>}
+                              {campoBalance < 0 && <span className="flex items-center gap-2"><i className="fas fa-arrow-right"></i> Ustedes le deben plata al campo.</span>}
+                          </div>
+                       </div>
+
+                       {/* NUEVO MOVIMIENTO */}
+                       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8">
+                          <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                            <i className="fas fa-plus text-amber-500"></i> Nuevo Movimiento
+                          </h2>
+                          <form onSubmit={handleCampoSubmit} className="space-y-6">
+                            <div className="grid grid-cols-2 md:flex gap-4">
+                              <button type="button" onClick={() => setCampoType('le_presto')} className={`flex-1 py-4 rounded-xl text-sm font-bold transition-colors ${campoType === 'le_presto' ? 'bg-amber-100 text-amber-800 border-2 border-amber-500 shadow-inner' : 'bg-slate-100 text-slate-500 border-2 border-transparent hover:bg-slate-200'}`}>
+                                <i className="fas fa-arrow-up-right-from-square mb-1 text-lg block"></i> Le presto al campo
+                              </button>
+                              <button type="button" onClick={() => setCampoType('me_presta')} className={`flex-1 py-4 rounded-xl text-sm font-bold transition-colors ${campoType === 'me_presta' ? 'bg-indigo-100 text-indigo-800 border-2 border-indigo-500 shadow-inner' : 'bg-slate-100 text-slate-500 border-2 border-transparent hover:bg-slate-200'}`}>
+                                <i className="fas fa-arrow-down-long mb-1 text-lg block"></i> Pido al campo
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">Monto (ARS)</label>
+                                <input 
+                                  type="text" 
+                                  inputMode="numeric"
+                                  value={campoAmount ? Number(campoAmount).toLocaleString('es-AR') : ''} 
+                                  onChange={(e) => setCampoAmount(e.target.value.replace(/\D/g, ''))} 
+                                  placeholder="0" 
+                                  className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none font-bold text-xl" 
+                                  required 
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">Cuenta afectada</label>
+                                <select value={campoMethod} onChange={(e) => setCampoMethod(e.target.value)} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none font-bold text-slate-700">
+                                  {PAYMENT_METHODS.map(method => <option key={method} value={method}>{method}</option>)}
+                                </select>
+                                <p className="text-[10px] text-slate-400 mt-2">
+                                    {campoType === 'le_presto' ? 'La plata sale de esta cuenta.' : 'La plata entra a esta cuenta.'}
+                                </p>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">Descripción</label>
+                                <input type="text" value={campoDesc} onChange={(e) => setCampoDesc(e.target.value)} placeholder="Ej: Para comprar semillas..." className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none font-medium" required />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">Fecha</label>
+                                <input type="date" value={campoDate} onChange={(e) => setCampoDate(e.target.value)} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none font-medium" required />
+                              </div>
+                            </div>
+
+                            <div className="pt-2">
+                              <button type="submit" className={`w-full md:w-auto md:px-16 text-white font-bold py-4 rounded-xl transition-colors shadow-sm ${campoType === 'le_presto' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-500 hover:bg-indigo-600'}`}>
+                                Registrar Préstamo
+                              </button>
+                            </div>
+                          </form>
+                       </div>
+                       
+                       {/* HISTORIAL */}
+                       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8">
+                          <h2 className="text-xl font-bold mb-6">Historial de Movimientos</h2>
+                          {sortedCampo.length === 0 ? (
+                            <div className="text-center py-12 text-slate-400">
+                              <i className="fas fa-tractor text-5xl mx-auto mb-4 opacity-20 block"></i>
+                              <p>No hay movimientos registrados con el campo.</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-4 overflow-y-auto max-h-[600px] pr-2">
+                              {sortedCampo.map(t => (
+                                <div key={t.id} className="group flex flex-col sm:flex-row sm:items-center justify-between p-5 rounded-xl border border-slate-100 hover:border-slate-300 bg-slate-50 transition-all gap-4">
+                                  <div className="flex items-center gap-5">
+                                    <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 shadow-sm ${t.type === 'le_presto' ? 'bg-amber-100 text-amber-600' : 'bg-indigo-100 text-indigo-600'}`}>
+                                      {t.type === 'le_presto' ? <i className="fas fa-arrow-up-right-from-square text-lg"></i> : <i className="fas fa-arrow-down-long text-lg"></i>}
+                                    </div>
+                                    <div>
+                                      <h3 className="font-bold text-slate-800 text-base">{t.description}</h3>
+                                      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                                        <p className="text-sm text-slate-500"><i className="far fa-calendar-alt mr-1"></i> {new Date(t.date).toLocaleDateString('es-AR')}</p>
+                                        <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-700 flex items-center gap-1">
+                                           <i className="fas fa-wallet"></i> {t.paymentMethod}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto border-t sm:border-0 border-slate-200 pt-3 sm:pt-0">
+                                    <span className={`font-black text-xl ${t.type === 'le_presto' ? 'text-amber-600' : 'text-indigo-600'}`}>
+                                      {t.type === 'le_presto' ? '+' : '-'}{formatARS(t.amount)}
+                                    </span>
+                                    <button onClick={() => deleteCampoTransaction(t.id)} className="p-2.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors" title="Borrar movimiento">
+                                      <i className="fas fa-trash-can text-lg"></i>
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* -------------------- FLUJO DIARIO -------------------- */}
+                {activeTab === 'dashboard' && (
+                  <div className="space-y-8 animate-in fade-in duration-500">
+                    
+                    {/* 1. SALDOS REALES */}
+                    <div>
+                      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4">
+                        <div>
+                          <h2 className="text-xl font-bold text-slate-800">Saldos Reales</h2>
+                          <p className="text-slate-500 text-sm">El dinero que tienen disponible hoy en base a todo el historial de movimientos.</p>
+                        </div>
+                        
+                        <button onClick={openTransferModal} className="bg-teal-100 hover:bg-teal-200 text-teal-800 px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-colors border border-teal-200 shadow-sm shrink-0">
+                          <i className="fas fa-money-bill-transfer"></i> Enviar a Bóveda
+                        </button>
+                      </div>
+
+                      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div className="bg-indigo-50 p-6 rounded-2xl shadow-sm border border-indigo-100 flex flex-col justify-between">
+                          <div className="flex justify-between items-start text-indigo-600 mb-2">
+                            <span className="font-bold">Cuenta Guada</span>
+                            <i className="fas fa-wallet text-xl opacity-80"></i>
+                          </div>
+                          <span className="text-3xl font-black text-indigo-900">{formatARS(accountBalances['Cuenta Guada'])}</span>
+                        </div>
+
+                        <div className="bg-blue-50 p-6 rounded-2xl shadow-sm border border-blue-100 flex flex-col justify-between">
+                          <div className="flex justify-between items-start text-blue-600 mb-2">
+                            <span className="font-bold">Cuenta Nico</span>
+                            <i className="fas fa-wallet text-xl opacity-80"></i>
+                          </div>
+                          <span className="text-3xl font-black text-blue-900">{formatARS(accountBalances['Cuenta Nico'])}</span>
+                        </div>
+
+                        <div className="bg-emerald-50 p-6 rounded-2xl shadow-sm border border-emerald-200 flex flex-col justify-between relative overflow-hidden">
+                          <div className="flex justify-between items-start text-emerald-700 mb-2">
+                            <span className="font-bold">Efectivo Total</span>
+                            <i className="fas fa-money-bill-wave text-xl opacity-80"></i>
+                          </div>
+                          <span className="text-3xl font-black text-emerald-900 mb-4">{formatARS(accountBalances['Efectivo'])}</span>
+                          
+                          <div className="bg-white/60 rounded-xl p-3 border border-emerald-100 space-y-2">
+                            <div className="flex justify-between items-center">
+                              <label className="text-xs font-bold text-emerald-700">Reservado (No tocar):</label>
+                              <input 
+                                type="text" 
+                                inputMode="numeric"
+                                value={reservedCash ? Number(reservedCash).toLocaleString('es-AR') : ''} 
+                                onChange={(e) => {
+                                  const val = e.target.value.replace(/\D/g, '');
+                                  setReservedCash(val ? Number(val) : 0);
+                                }}
+                                className="w-24 bg-white border border-emerald-300 rounded text-right p-1 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500 text-emerald-800"
+                              />
+                            </div>
+                            <div className="flex justify-between items-center pt-2 border-t border-emerald-200/50">
+                              <span className="text-xs font-bold text-slate-600">Disponible para gastar:</span>
+                              <span className={`font-black ${(accountBalances['Efectivo'] || 0) - reservedCash < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                                {formatARS((accountBalances['Efectivo'] || 0) - reservedCash)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-700 flex flex-col justify-between relative overflow-hidden text-white">
+                          <div className="absolute top-0 right-0 p-4 opacity-5">
+                            <i className="fas fa-vault text-6xl"></i>
+                          </div>
+                          <div className="flex justify-between items-start text-slate-300 mb-2 relative z-10">
+                            <span className="font-bold">Fondo Total</span>
+                            <i className="fas fa-scale-balanced text-xl opacity-80"></i>
+                          </div>
+                          <span className="text-3xl font-black text-white mb-4 relative z-10">{formatARS(totalSaldos)}</span>
+                          
+                          <div className="bg-slate-700/50 rounded-xl p-3 border border-slate-600 relative z-10">
+                            <div className="flex justify-between items-center text-xs font-bold text-slate-300">
+                              <span>Suma de las 3 cuentas</span>
+                              <i className="fas fa-check-circle text-emerald-400"></i>
+                            </div>
+                          </div>
+                        </div>
+                      </section>
+                    </div>
+
+                    {/* 2. CARGA RÁPIDA (Ancho completo) */}
+                    <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                      <h2 className="text-lg font-bold mb-6 flex items-center gap-2">
+                        <i className="fas fa-plus text-xl text-teal-600"></i> Carga Rápida
+                      </h2>
+                      <form onSubmit={handleSubmit} className="space-y-4">
+                        <div className="grid grid-cols-2 md:flex gap-2 mb-2">
+                          <button type="button" onClick={() => setPerson('Guada')} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${person === 'Guada' ? 'bg-teal-100 text-teal-800 border-2 border-teal-500' : 'bg-slate-100 text-slate-500 border-2 border-transparent'}`}>Guada</button>
+                          <button type="button" onClick={() => setPerson('Nico')} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${person === 'Nico' ? 'bg-teal-100 text-teal-800 border-2 border-teal-500' : 'bg-slate-100 text-slate-500 border-2 border-transparent'}`}>Nico</button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Tipo de Movimiento</label>
+                              <select value={type} onChange={(e) => setType(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none">
+                                {Object.keys(STRUCTURE).filter(t => t !== 'ahorro').map(t => (
+                                  <option key={t} value={t}>{TYPE_LABELS[t]}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Categoría</label>
+                              <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none">
+                                {STRUCTURE[type]?.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Monto (ARS)</label>
+                              <input 
+                                type="text" 
+                                inputMode="numeric"
+                                value={amount ? Number(amount).toLocaleString('es-AR') : ''} 
+                                onChange={(e) => setAmount(e.target.value.replace(/\D/g, ''))} 
+                                placeholder="0" 
+                                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none font-bold text-lg" 
+                                required 
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Medio de Pago / Cuenta</label>
+                              <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none font-bold text-slate-700">
+                                {PAYMENT_METHODS.map(method => <option key={method} value={method}>{method}</option>)}
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">
+                                Descripción 
+                                {category === 'Otros' && <span className="text-rose-500 ml-1 normal-case">* (Debes detallar el gasto)</span>}
+                              </label>
+                              <input 
+                                type="text" 
+                                value={description} 
+                                onChange={(e) => setDescription(e.target.value)} 
+                                placeholder={category === 'Otros' ? "Detalla en qué se gastó..." : "Ej: Compra en Coto"} 
+                                className={`w-full p-2.5 bg-slate-50 border rounded-lg focus:ring-2 focus:ring-teal-500 outline-none ${category === 'Otros' && !description ? 'border-rose-300' : 'border-slate-200'}`}
+                                required={category === 'Otros'}
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Fecha</label>
+                              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none" required />
+                            </div>
+                        </div>
+
+                        {paymentMethod === 'Efectivo' && type !== 'ingreso' && ((accountBalances['Efectivo'] || 0) - reservedCash - Number(amount) < 0) && (
+                          <div className="bg-amber-50 text-amber-800 p-3 rounded-lg text-xs flex items-start gap-2 border border-amber-200">
+                            <i className="fas fa-triangle-exclamation text-base mt-0.5 shrink-0"></i>
+                            <div>Estás gastando dinero de tu <b>Efectivo Reservado</b>. Tu saldo disponible para gastar en efectivo quedará en negativo.</div>
+                          </div>
+                        )}
+
+                        <button type="submit" className="w-full md:w-auto md:px-12 bg-teal-600 hover:bg-teal-700 text-white font-bold py-3.5 rounded-lg transition-colors mt-4">
+                          Registrar Movimiento
+                        </button>
+                      </form>
+                    </section>
+
+                    {/* 3. CHECKLIST DE VENCIMIENTOS */}
+                    <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                      <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 flex items-center gap-2">
+                        <i className="fas fa-calendar-check text-xl text-teal-500"></i> Checklist de Vencimientos
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        {Object.entries(mandatoryChecklist).map(([item, isPaid]) => (
+                          <div key={item} className={`p-3 rounded-xl border flex items-center gap-3 transition-all ${isPaid ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isPaid ? 'bg-emerald-500 text-white shadow-sm' : 'bg-slate-200 text-slate-400'}`}>
+                              {isPaid ? <i className="fas fa-check"></i> : <i className="fas fa-hourglass-half"></i>}
+                            </div>
+                            <span className={`text-sm font-bold ${isPaid ? 'text-emerald-800' : 'text-slate-500'}`}>{item}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+
+                    {/* 4. MOVIMIENTOS GUARDADOS */}
+                    <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+                      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                        <h2 className="text-lg font-bold">Movimientos Guardados</h2>
+                        <div className="flex bg-slate-100 rounded-lg p-1 flex-wrap gap-1 w-full md:w-auto">
+                          <button onClick={() => setFilterType('all')} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === 'all' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Todos</button>
+                          {Object.keys(STRUCTURE).map(ft => (
+                            <button key={ft} onClick={() => setFilterType(ft)} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === ft ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+                              {TYPE_LABELS[ft]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {filteredTransactions.length === 0 ? (
+                          <div className="text-center py-12 text-slate-400">
+                            <i className="fas fa-list text-5xl mx-auto mb-3 opacity-20 block"></i>
+                            <p>No hay movimientos para este filtro.</p>
+                          </div>
+                        ) : (
+                        <div className="space-y-3 overflow-y-auto max-h-[500px] pr-2">
+                          {filteredTransactions.map(t => (
+                            <div key={t.id} className="group flex items-center justify-between p-4 rounded-xl border border-slate-100 hover:border-slate-200 hover:shadow-sm transition-all bg-slate-50 hover:bg-white">
+                              <div className="flex items-center gap-4">
+                                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${getTypeColor(t.type)}`}>
+                                  {getTypeIcon(t.type)}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h3 className="font-bold text-slate-800">{t.category}</h3>
+                                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
+                                      {t.person}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                    <p className="text-sm text-slate-500">{t.description || 'Sin descripción'} • {t.date ? new Date(t.date).toLocaleDateString('es-AR') : 'Sin fecha'}</p>
+                                    <span className="text-[10px] font-bold flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                      <i className="fas fa-wallet"></i> {t.paymentMethod}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <span className={`font-black text-lg ${t.type === 'ingreso' ? 'text-emerald-600' : 'text-slate-800'}`}>
+                                  {t.type === 'ingreso' ? '+' : '-'}{formatARS(t.amount)}
+                                </span>
+                                <button onClick={() => deleteTransaction(t.id)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
+                                  <i className="fas fa-trash-can"></i>
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+
+                    {/* 5. RECORDATORIO CALENDAR */}
+                    <section className="bg-blue-50 rounded-2xl shadow-sm border border-blue-100 p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+                      <div>
+                        <h2 className="text-lg font-bold flex items-center gap-2 text-blue-900 mb-1">
+                          <i className="far fa-calendar-check text-xl text-blue-600"></i> Recordatorio Diario
+                        </h2>
+                        <p className="text-sm text-blue-700">Creen un evento automático en Google Calendar para que les suene todos los días a las 23:00 hs y no se olviden de cargar los gastos.</p>
+                      </div>
+                      <a href={getCalendarLink()} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold py-3.5 px-6 rounded-xl transition-colors shrink-0">
+                        <i className="fab fa-google text-lg"></i> Agendar Alarma
+                      </a>
+                    </section>
+
+                  </div>
+                )}
+              </main>
+
+              {/* MODAL TRANSFERENCIA A BÓVEDA */}
+              {transferModal && (
+                <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+                  <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden">
+                    <div className="p-4 flex justify-between items-center bg-teal-600 text-white">
+                      <h3 className="font-bold flex items-center gap-2">
+                        <i className="fas fa-money-bill-transfer text-xl"></i> Transferir a Bóveda
+                      </h3>
+                      <button onClick={() => setTransferModal(false)} className="text-white/80 hover:text-white bg-transparent p-1 rounded-full hover:bg-white/20 transition-colors">
+                        <i className="fas fa-xmark text-xl"></i>
+                      </button>
+                    </div>
+                    
+                    <form onSubmit={handleTransferSubmit} className="p-6 space-y-4">
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2"><i className="fas fa-arrow-up-right-from-square text-rose-500"></i> Sale de (Flujo Diario)</h4>
+                          <div className="space-y-3">
+                              <div>
+                                  <label className="block text-xs font-semibold text-slate-600 mb-1">Cuenta de donde se descuenta</label>
+                                  <select value={transferFrom} onChange={(e) => setTransferFrom(e.target.value)} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none font-bold">
+                                    {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                                  </select>
+                              </div>
+                              <div>
+                                  <label className="block text-xs font-semibold text-slate-600 mb-1">Monto a descontar (ARS)</label>
+                                  <input 
+                                    type="text" 
+                                    inputMode="numeric"
+                                    value={transferAmountOut ? Number(transferAmountOut).toLocaleString('es-AR') : ''} 
+                                    onChange={(e) => {
+                                        const val = e.target.value.replace(/\D/g, '');
+                                        setTransferAmountOut(val);
+                                        if (!isUSD(transferTo)) setTransferAmountIn(val);
+                                    }} 
+                                    placeholder="0" 
+                                    className="w-full p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none font-bold text-lg text-rose-600" 
+                                    required 
+                                  />
+                              </div>
+                          </div>
+                      </div>
+
+                      <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200">
+                          <h4 className="text-xs font-bold text-emerald-700 uppercase mb-3 flex items-center gap-2"><i className="fas fa-arrow-right-to-bracket"></i> Entra a (Bóveda)</h4>
+                          <div className="space-y-3">
+                              <div>
+                                  <label className="block text-xs font-semibold text-emerald-800 mb-1">Cuenta de Ahorro Destino</label>
+                                  <select value={transferTo} onChange={(e) => {
+                                      setTransferTo(e.target.value);
+                                      if (!isUSD(e.target.value) && transferAmountOut) setTransferAmountIn(transferAmountOut);
+                                      else setTransferAmountIn('');
+                                  }} className="w-full p-2.5 bg-white border border-emerald-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-emerald-900">
+                                    {SAVINGS_ACCOUNTS.map(m => <option key={m} value={m}>{formatAccountName(m)}</option>)}
+                                  </select>
+                              </div>
+                              <div>
+                                  <label className="block text-xs font-semibold text-emerald-800 mb-1">Monto que ingresa {isUSD(transferTo) ? '(USD)' : '(ARS)'}</label>
+                                  <input 
+                                    type="text" 
+                                    inputMode="numeric"
+                                    value={transferAmountIn ? Number(transferAmountIn).toLocaleString('es-AR') : ''} 
+                                    onChange={(e) => setTransferAmountIn(e.target.value.replace(/\D/g, ''))} 
+                                    placeholder="0" 
+                                    className="w-full p-2.5 bg-white border border-emerald-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none font-bold text-lg text-emerald-700" 
+                                    required 
+                                  />
+                              </div>
+                          </div>
+                      </div>
+
+                      <div className="flex gap-3 pt-2">
+                        <button type="button" onClick={() => setTransferModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-700 font-bold rounded-lg hover:bg-slate-200 transition-colors">Cancelar</button>
+                        <button type="submit" className="flex-1 py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-lg transition-colors">Confirmar Envío</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* MODAL INGRESO/RETIRO AHORROS */}
+              {savingsModal.isOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+                  <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden">
+                    <div className={`p-4 flex justify-between items-center text-white ${savingsModal.type === 'in' ? 'bg-emerald-600' : 'bg-rose-600'}`}>
+                      <h3 className="font-bold flex items-center gap-2">
+                        {savingsModal.type === 'in' ? <i className="fas fa-circle-arrow-down text-xl"></i> : <i className="fas fa-circle-arrow-up text-xl"></i>}
+                        {savingsModal.type === 'in' ? 'Ingresar a' : 'Retirar de'} {SAVINGS_BOXES.find(b => b.id === savingsModal.boxId)?.title}
+                      </h3>
+                      <button onClick={closeSavingsModal} className="text-white/80 hover:text-white bg-transparent p-1 rounded-full hover:bg-white/20 transition-colors">
+                        <i className="fas fa-xmark text-xl"></i>
+                      </button>
+                    </div>
+                    
+                    <form onSubmit={handleSavingsSubmit} className="p-6 space-y-4">
+                      {savingsModal.accounts.length > 1 && (
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-500 uppercase mb-2">Moneda</label>
+                          <div className="flex gap-2">
+                             {savingsModal.accounts.map(acc => (
+                                <button
+                                   key={acc}
+                                   type="button"
+                                   onClick={() => setSavingsModal({...savingsModal, selectedAccount: acc})}
+                                   className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-colors ${savingsModal.selectedAccount === acc ? 'bg-emerald-100 text-emerald-800 border-2 border-emerald-500' : 'bg-slate-100 text-slate-500 border-2 border-transparent'}`}
+                                >
+                                   {isUSD(acc) ? 'Dólares (USD)' : 'Pesos (ARS)'}
+                                </button>
+                             ))}
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Monto {isUSD(savingsModal.selectedAccount) ? '(USD)' : '(ARS)'}</label>
+                        <input 
+                          type="text" 
+                          inputMode="numeric"
+                          value={savingsAmount ? Number(savingsAmount).toLocaleString('es-AR') : ''} 
+                          onChange={(e) => setSavingsAmount(e.target.value.replace(/\D/g, ''))} 
+                          placeholder="0" 
+                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none text-xl font-bold" 
+                          autoFocus 
+                          required 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">
+                          Motivo {savingsModal.type === 'out' && <span className="text-rose-500">* Obligatorio</span>}
+                        </label>
+                        <input type="text" value={savingsReason} onChange={(e) => setSavingsReason(e.target.value)} placeholder={savingsModal.type === 'in' ? "Ej: Sobrante del sueldo" : "Ej: Compra de pasajes"} className={`w-full p-3 bg-slate-50 border rounded-lg outline-none ${savingsModal.type === 'out' && !savingsReason ? 'border-rose-300 focus:ring-2 focus:ring-rose-500' : 'border-slate-200 focus:ring-2 focus:ring-emerald-500'}`} required={savingsModal.type === 'out'} />
+                      </div>
+                      <div className="flex gap-3 pt-4">
+                        <button type="button" onClick={closeSavingsModal} className="flex-1 py-3 bg-slate-100 text-slate-700 font-bold rounded-lg hover:bg-slate-200 transition-colors">Cancelar</button>
+                        <button type="submit" className={`flex-1 py-3 text-white font-bold rounded-lg transition-colors ${savingsModal.type === 'in' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}`}>Confirmar {savingsModal.type === 'in' ? 'Ingreso' : 'Retiro'}</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {historyModal.isOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+                  <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden flex flex-col max-h-[80vh]">
+                    <div className="p-4 flex justify-between items-center bg-slate-800 text-white">
+                      <h3 className="font-bold flex items-center gap-2">
+                        <i className="fas fa-clock-rotate-left"></i> Historial: {SAVINGS_BOXES.find(b => b.id === historyModal.boxId)?.title}
+                      </h3>
+                      <button onClick={closeHistory} className="text-white/80 hover:text-white bg-transparent p-1 rounded-full hover:bg-white/20 transition-colors">
+                        <i className="fas fa-xmark text-xl"></i>
+                      </button>
+                    </div>
+                    <div className="p-4 overflow-y-auto flex-1 bg-slate-50">
+                      {sortedSavings.filter(tx => historyModal.accounts.includes(tx.account)).length === 0 ? (
+                        <p className="text-center text-slate-500 py-8">No hay movimientos para esta cuenta.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {sortedSavings.filter(tx => historyModal.accounts.includes(tx.account)).map(tx => (
+                            <div key={tx.id} className="flex justify-between items-center p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
+                              <div>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${tx.type === 'in' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                                  {tx.type === 'in' ? 'INGRESO' : 'RETIRO'}
+                                </span>
+                                {historyModal.accounts.length > 1 && (
+                                  <span className="ml-2 text-[10px] bg-slate-100 text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded font-bold">
+                                    {isUSD(tx.account) ? 'USD' : 'ARS'}
+                                  </span>
+                                )}
+                                <p className="text-sm font-medium text-slate-800 mt-1">{tx.reason}</p>
+                                <p className="text-xs text-slate-500 mt-0.5"><i className="far fa-calendar-alt"></i> {tx.date ? new Date(tx.date).toLocaleDateString('es-AR') : 'Sin fecha'}</p>
+                              </div>
+                              <span className={`font-black text-lg ${tx.type === 'in' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                {tx.type === 'in' ? '+' : '-'}{getCurrencyFormatter(tx.account)(tx.amount)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          );
+        }
+
+        // SISTEMA DE PREVENCIÓN DE PANTALLA BLANCA (Error Boundary)
+        class ErrorBoundary extends React.Component {
+          constructor(props) {
+            super(props);
+            this.state = { hasError: false, error: null };
+          }
+          static getDerivedStateFromError(error) { return { hasError: true, error }; }
+          render() {
+            if (this.state.hasError) {
+              return (
+                <div className="p-8 text-rose-600 bg-rose-50 min-h-screen">
+                  <h1 className="text-2xl font-bold mb-4"><i className="fas fa-triangle-exclamation"></i> Algo salió mal internamente</h1>
+                  <p className="mb-4">Parece que hay un error de conexión, pero no te preocupes, tus datos en la nube están a salvo.</p>
+                  <pre className="text-sm bg-white p-4 border border-rose-200 rounded-lg overflow-auto">{this.state.error && this.state.error.toString()}</pre>
+                </div>
+              );
+            }
+            return this.props.children;
+          }
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        const renderApp = () => root.render(<ErrorBoundary><App /></ErrorBoundary>);
+        
+        // Iniciador 100% a prueba de fallos
+        const startApp = () => {
+            if (window.Firebase) {
+                renderApp();
+            } else {
+                setTimeout(startApp, 500); 
+            }
+        };
+
+        startApp();
+    </script>
+</body>
+</html>
