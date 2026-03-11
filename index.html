@@ -62,7 +62,7 @@
         const STRUCTURE = {
           ingreso: ['Sueldo Nico', 'Sueldo Guada'],
           pago_tarjetas: ['Tarjeta Nico', 'Tarjeta Guada', 'Naranja Nico', 'Naranja Guada'],
-          gastos_casa: ['Expensas casa', 'Expensas terreno', 'Luz', 'Agua', 'Mirta', 'Piletero', 'Jardinero', 'Crédito auto'],
+          gastos_casa: ['Expensas casa', 'Expensas terreno', 'Luz', 'Agua', 'Mirta', 'Piletero', 'Jardinero', 'Crédito auto', 'Crédito Hipotecario'],
           gastos_diarios: ['Verdulería', 'Carnicería', 'Super/almacén', 'Delivery', 'Nafta', 'Comidas afuera/salidas', 'Salidas con amigos/flia', 'Otros'],
           ahorro: ['Envío a Bóveda']
         };
@@ -299,13 +299,20 @@
           const mandatoryChecklist = useMemo(() => {
             const checklist = {
               'Tarjeta Nico': false, 'Tarjeta Guada': false, 'Naranja Nico': false, 'Naranja Guada': false,
-              'Expensas casa': false, 'Expensas terreno': false, 'Luz': false, 'Agua': false, 'Crédito auto': false
+              'Expensas casa': false, 'Expensas terreno': false, 'Luz': false, 'Agua': false, 'Crédito auto': false, 'Crédito Hipotecario': false
             };
-            filteredTransactions.forEach(t => {
-              if (t.category && checklist[t.category] !== undefined) checklist[t.category] = true;
+            
+            // Evaluamos TODAS las transacciones del mes, sin importar el filtro de vista ("filterType")
+            transactions.forEach(t => {
+              const safeDate = t.date || '';
+              const matchMonth = filterMonth === 'all' || (safeDate && safeDate.substring(0, 7) === filterMonth);
+              
+              if (matchMonth && t.category && checklist[t.category] !== undefined) {
+                checklist[t.category] = true;
+              }
             });
             return checklist;
-          }, [filteredTransactions]);
+          }, [transactions, filterMonth]);
 
           const savingsBalances = useMemo(() => {
             const balances = {};
@@ -1130,24 +1137,7 @@
                       </form>
                     </section>
 
-                    {/* 3. CHECKLIST DE VENCIMIENTOS */}
-                    <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                      <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 flex items-center gap-2">
-                        <i className="fas fa-calendar-check text-xl text-teal-500"></i> Checklist de Vencimientos
-                      </h3>
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                        {Object.entries(mandatoryChecklist).map(([item, isPaid]) => (
-                          <div key={item} className={`p-3 rounded-xl border flex items-center gap-3 transition-all ${isPaid ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
-                            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isPaid ? 'bg-emerald-500 text-white shadow-sm' : 'bg-slate-200 text-slate-400'}`}>
-                              {isPaid ? <i className="fas fa-check"></i> : <i className="fas fa-hourglass-half"></i>}
-                            </div>
-                            <span className={`text-sm font-bold ${isPaid ? 'text-emerald-800' : 'text-slate-500'}`}>{item}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-
-                    {/* 4. MOVIMIENTOS GUARDADOS */}
+                    {/* 3. MOVIMIENTOS GUARDADOS */}
                     <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
                       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                         <h2 className="text-lg font-bold">Movimientos Guardados</h2>
@@ -1201,6 +1191,23 @@
                           ))}
                         </div>
                       )}
+                    </section>
+
+                    {/* 4. CHECKLIST DE VENCIMIENTOS */}
+                    <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                      <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider mb-4 flex items-center gap-2">
+                        <i className="fas fa-calendar-check text-xl text-teal-500"></i> Checklist de Vencimientos
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        {Object.entries(mandatoryChecklist).map(([item, isPaid]) => (
+                          <div key={item} className={`p-3 rounded-xl border flex items-center gap-3 transition-all ${isPaid ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${isPaid ? 'bg-emerald-500 text-white shadow-sm' : 'bg-slate-200 text-slate-400'}`}>
+                              {isPaid ? <i className="fas fa-check"></i> : <i className="fas fa-hourglass-half"></i>}
+                            </div>
+                            <span className={`text-sm font-bold ${isPaid ? 'text-emerald-800' : 'text-slate-500'}`}>{item}</span>
+                          </div>
+                        ))}
+                      </div>
                     </section>
 
                     {/* 5. RECORDATORIO CALENDAR */}
