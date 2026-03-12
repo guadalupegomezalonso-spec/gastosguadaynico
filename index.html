@@ -41,7 +41,7 @@
         const { useState, useMemo, useEffect } = React;
 
         // ESTRUCTURA DE CATEGORÍAS Y CUENTAS
-        const PAYMENT_METHODS = ['Efectivo', 'Cuenta Guada', 'Cuenta Nico'];
+        const PAYMENT_METHODS = ['Efectivo Guada', 'Efectivo Nico', 'Cuenta Guada', 'Cuenta Nico'];
         const SAVINGS_ACCOUNTS = ['USD CASA', 'USD BANCO GUADA', 'USD BANCO NICO', 'IOL GUADA', 'IOL GUADA USD', 'IOL NICO', 'IOL NICO USD', 'PESOS EFECTIVO'];
         const SAVINGS_BOXES = [
           { id: 'USD CASA', title: 'USD CASA', accounts: ['USD CASA'] },
@@ -63,10 +63,11 @@
           ingreso: ['Sueldo Nico', 'Sueldo Guada'],
           pago_tarjetas: ['Tarjeta Nico', 'Tarjeta Guada', 'Naranja Nico', 'Naranja Guada'],
           gastos_casa: ['Expensas casa', 'Expensas terreno', 'Luz', 'Agua', 'Mirta', 'Piletero', 'Jardinero', 'Crédito auto', 'Crédito Hipotecario'],
-          gastos_diarios: ['Verdulería', 'Carnicería', 'Super/almacén', 'Delivery', 'Nafta', 'Comidas afuera/salidas', 'Salidas con amigos/flia', 'Otros'],
-          ahorro: ['Envío a Bóveda']
+          gastos_diarios: ['Verdulería', 'Carnicería', 'Super/almacén', 'Delivery', 'Nafta', 'Comidas afuera/salidas', 'Salidas con amigos/flia', 'Regalos', 'Remedios/farmacia/suplementos', 'Dentista/medico', 'Peluquería/manos/depilación', 'Otros'],
+          ahorro: ['Envío a Bóveda'],
+          transferencia: ['Paso de Plata'] // Agregado para permitir traspasos internos
         };
-        const TYPE_LABELS = { ingreso: 'Ingreso', pago_tarjetas: 'Pago tarjetas', gastos_casa: 'Pagos casa', gastos_diarios: 'Gastos diarios', ahorro: 'Ahorro / Inversión' };
+        const TYPE_LABELS = { ingreso: 'Ingreso', pago_tarjetas: 'Pago tarjetas', gastos_casa: 'Pagos casa', gastos_diarios: 'Gastos diarios', ahorro: 'Ahorro / Inversión', transferencia: 'Pasos de Plata' };
 
         function App() {
           const [activeTab, setActiveTab] = useState('dashboard');
@@ -80,11 +81,19 @@
           const [savingsReason, setSavingsReason] = useState('');
           const [historyModal, setHistoryModal] = useState({ isOpen: false, boxId: '', accounts: [] });
 
+          // Modal Transferencia a Bóveda
           const [transferModal, setTransferModal] = useState(false);
           const [transferFrom, setTransferFrom] = useState(PAYMENT_METHODS[0]);
           const [transferTo, setTransferTo] = useState(SAVINGS_ACCOUNTS[0]);
           const [transferAmountOut, setTransferAmountOut] = useState('');
           const [transferAmountIn, setTransferAmountIn] = useState('');
+
+          // Modal Traspaso Interno (Pasar Plata)
+          const [internalTransferModal, setInternalTransferModal] = useState(false);
+          const [transferIntFrom, setTransferIntFrom] = useState(PAYMENT_METHODS[0]);
+          const [transferIntTo, setTransferIntTo] = useState(PAYMENT_METHODS[1]);
+          const [transferIntAmount, setTransferIntAmount] = useState('');
+          const [transferIntDate, setTransferIntDate] = useState(new Date().toISOString().split('T')[0]);
 
           const [reservedCash, setReservedCash] = useState(0); 
 
@@ -227,12 +236,23 @@
           }, [campoTx]);
 
           const accountBalances = useMemo(() => {
-            const bals = { 'Efectivo': 0, 'Cuenta Guada': 0, 'Cuenta Nico': 0 };
+            const bals = { 'Efectivo': 0, 'Efectivo Guada': 0, 'Efectivo Nico': 0, 'Cuenta Guada': 0, 'Cuenta Nico': 0 };
             transactions.forEach(t => {
               const method = t.paymentMethod || 'Efectivo';
               if (bals[method] === undefined) bals[method] = 0;
-              if (t.type === 'ingreso') bals[method] += Number(t.amount || 0);
-              else bals[method] -= Number(t.amount || 0);
+              
+              if (t.type === 'ingreso') {
+                  bals[method] += Number(t.amount || 0);
+              } else if (t.type === 'transferencia') {
+                  // Sale plata del origen
+                  bals[method] -= Number(t.amount || 0);
+                  // Entra plata al destino
+                  const dest = t.transferTo;
+                  if (bals[dest] === undefined) bals[dest] = 0;
+                  bals[dest] += Number(t.amount || 0);
+              } else {
+                  bals[method] -= Number(t.amount || 0);
+              }
             });
             // Impacto de los préstamos del campo en nuestros saldos reales
             campoTx.forEach(tx => {
@@ -244,7 +264,8 @@
             return bals;
           }, [transactions, campoTx]);
 
-          const totalSaldos = (accountBalances['Cuenta Guada'] || 0) + (accountBalances['Cuenta Nico'] || 0) + (accountBalances['Efectivo'] || 0);
+          const totalEfectivo = (accountBalances['Efectivo'] || 0) + (accountBalances['Efectivo Guada'] || 0) + (accountBalances['Efectivo Nico'] || 0);
+          const totalSaldos = (accountBalances['Cuenta Guada'] || 0) + (accountBalances['Cuenta Nico'] || 0) + totalEfectivo;
 
           const campoBalance = useMemo(() => {
              return campoTx.reduce((acc, tx) => acc + (tx.type === 'le_presto' ? Number(tx.amount) : -Number(tx.amount)), 0);
@@ -274,7 +295,7 @@
 
               if (filterMonth === 'all' || tMonth === filterMonth) {
                 if (t.type === 'ingreso') totalIngresos += Number(t.amount || 0);
-                else {
+                else if (t.type !== 'transferencia') { // Ignoramos traspasos internos porque no son gastos ni ingresos
                   const typeSafe = t.type || 'gastos_diarios';
                   totalsByType[typeSafe] = (totalsByType[typeSafe] || 0) + Number(t.amount || 0);
                   if (typeSafe !== 'ahorro') totalGastos += Number(t.amount || 0);
@@ -351,6 +372,52 @@
             } else setTransactions(transactions.filter(t => t.id !== id));
           };
 
+          // GUARDADO TRASPASO INTERNO (PASAR PLATA)
+          const openInternalTransferModal = () => {
+            setInternalTransferModal(true);
+            setTransferIntAmount('');
+            setTransferIntFrom(PAYMENT_METHODS[0]);
+            setTransferIntTo(PAYMENT_METHODS[1]);
+            setTransferIntDate(new Date().toISOString().split('T')[0]);
+          };
+
+          const handleInternalTransferSubmit = async (e) => {
+            e.preventDefault();
+            const numAmount = Number(transferIntAmount);
+            if (!numAmount || numAmount <= 0) return;
+            
+            if (transferIntFrom === transferIntTo) {
+                showError("La cuenta de origen y destino no pueden ser la misma.");
+                return;
+            }
+            if (numAmount > (accountBalances[transferIntFrom] || 0)) {
+                showError(`No tenés suficientes fondos en ${transferIntFrom} para pasar.`);
+                return;
+            }
+
+            const newTx = { 
+                type: 'transferencia', 
+                category: 'Paso de Plata', 
+                amount: numAmount, 
+                paymentMethod: transferIntFrom, // de donde sale
+                transferTo: transferIntTo,     // a donde entra
+                description: `De ${transferIntFrom} a ${transferIntTo}`, 
+                date: transferIntDate, 
+                person: 'Ambos', 
+                createdAt: Date.now() 
+            };
+
+            if (user && dbConfig) {
+              const { addDoc, collection } = window.Firebase;
+              const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
+              try { await addDoc(collection(dbConfig.db, 'artifacts', appId, 'public', 'data', 'transactions'), newTx);
+              } catch (err) { showError("Hubo un error al registrar el traspaso."); }
+            } else { setTransactions([newTx, ...transactions]); }
+            
+            setInternalTransferModal(false);
+          };
+
+          // GUARDADO CAMPO
           const handleCampoSubmit = async (e) => {
             e.preventDefault();
             if (!campoAmount || Number(campoAmount) <= 0) return;
@@ -486,6 +553,7 @@
             if (txType === 'gastos_casa') return <i className="fas fa-home text-xl opacity-80"></i>;
             if (txType === 'ahorro') return <i className="fas fa-piggy-bank text-xl opacity-80"></i>;
             if (txType === 'le_presto') return <i className="fas fa-tractor text-xl opacity-80"></i>;
+            if (txType === 'transferencia') return <i className="fas fa-right-left text-xl opacity-80"></i>;
             return <i className="fas fa-bag-shopping text-xl opacity-80"></i>;
           };
 
@@ -495,6 +563,7 @@
             if (txType === 'gastos_casa') return 'bg-blue-100 text-blue-600';
             if (txType === 'ahorro') return 'bg-teal-100 text-teal-600';
             if (txType === 'le_presto') return 'bg-amber-100 text-amber-600';
+            if (txType === 'transferencia') return 'bg-indigo-100 text-indigo-600';
             return 'bg-rose-100 text-rose-600';
           };
 
@@ -983,9 +1052,14 @@
                           <p className="text-slate-500 text-sm">El dinero que tienen disponible hoy en base a todo el historial de movimientos.</p>
                         </div>
                         
-                        <button onClick={openTransferModal} className="bg-teal-100 hover:bg-teal-200 text-teal-800 px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-colors border border-teal-200 shadow-sm shrink-0">
-                          <i className="fas fa-money-bill-transfer"></i> Enviar a Bóveda
-                        </button>
+                        <div className="flex gap-2 w-full md:w-auto">
+                            <button onClick={openInternalTransferModal} className="flex-1 md:flex-none bg-indigo-100 hover:bg-indigo-200 text-indigo-800 px-5 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors border border-indigo-200 shadow-sm shrink-0">
+                              <i className="fas fa-right-left"></i> Pasar Plata
+                            </button>
+                            <button onClick={openTransferModal} className="flex-1 md:flex-none bg-teal-100 hover:bg-teal-200 text-teal-800 px-5 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors border border-teal-200 shadow-sm shrink-0">
+                              <i className="fas fa-money-bill-transfer"></i> Enviar a Bóveda
+                            </button>
+                        </div>
                       </div>
 
                       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -1010,7 +1084,13 @@
                             <span className="font-bold">Efectivo Total</span>
                             <i className="fas fa-money-bill-wave text-xl opacity-80"></i>
                           </div>
-                          <span className="text-3xl font-black text-emerald-900 mb-4">{formatARS(accountBalances['Efectivo'])}</span>
+                          <span className="text-3xl font-black text-emerald-900 mb-2">{formatARS(totalEfectivo)}</span>
+                          
+                          <div className="flex justify-between text-xs font-bold text-emerald-800 mb-4 px-2 bg-emerald-200/50 rounded py-1.5">
+                            <span>G: {formatARS(accountBalances['Efectivo Guada'] || 0)}</span>
+                            <span>N: {formatARS(accountBalances['Efectivo Nico'] || 0)}</span>
+                            {(accountBalances['Efectivo'] || 0) !== 0 && <span title="Efectivo previo sin asignar">?: {formatARS(accountBalances['Efectivo'])}</span>}
+                          </div>
                           
                           <div className="bg-white/60 rounded-xl p-3 border border-emerald-100 space-y-2">
                             <div className="flex justify-between items-center">
@@ -1028,8 +1108,8 @@
                             </div>
                             <div className="flex justify-between items-center pt-2 border-t border-emerald-200/50">
                               <span className="text-xs font-bold text-slate-600">Disponible para gastar:</span>
-                              <span className={`font-black ${(accountBalances['Efectivo'] || 0) - reservedCash < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
-                                {formatARS((accountBalances['Efectivo'] || 0) - reservedCash)}
+                              <span className={`font-black ${totalEfectivo - reservedCash < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                                {formatARS(totalEfectivo - reservedCash)}
                               </span>
                             </div>
                           </div>
@@ -1070,7 +1150,7 @@
                             <div>
                               <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Tipo de Movimiento</label>
                               <select value={type} onChange={(e) => setType(e.target.value)} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 outline-none">
-                                {Object.keys(STRUCTURE).filter(t => t !== 'ahorro').map(t => (
+                                {Object.keys(STRUCTURE).filter(t => t !== 'ahorro' && t !== 'transferencia').map(t => (
                                   <option key={t} value={t}>{TYPE_LABELS[t]}</option>
                                 ))}
                               </select>
@@ -1124,7 +1204,7 @@
                             </div>
                         </div>
 
-                        {paymentMethod === 'Efectivo' && type !== 'ingreso' && ((accountBalances['Efectivo'] || 0) - reservedCash - Number(amount) < 0) && (
+                        {paymentMethod.includes('Efectivo') && type !== 'ingreso' && (totalEfectivo - reservedCash - Number(amount) < 0) && (
                           <div className="bg-amber-50 text-amber-800 p-3 rounded-lg text-xs flex items-start gap-2 border border-amber-200">
                             <i className="fas fa-triangle-exclamation text-base mt-0.5 shrink-0"></i>
                             <div>Estás gastando dinero de tu <b>Efectivo Reservado</b>. Tu saldo disponible para gastar en efectivo quedará en negativo.</div>
@@ -1173,16 +1253,28 @@
                                   </div>
                                   <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                                     <p className="text-sm text-slate-500">{t.description || 'Sin descripción'} • {t.date ? new Date(t.date).toLocaleDateString('es-AR') : 'Sin fecha'}</p>
-                                    <span className="text-[10px] font-bold flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                                      <i className="fas fa-wallet"></i> {t.paymentMethod}
-                                    </span>
+                                    {t.type === 'transferencia' ? (
+                                      <span className="text-[10px] font-bold flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                        {t.paymentMethod} <i className="fas fa-arrow-right text-[8px]"></i> {t.transferTo}
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] font-bold flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                        <i className="fas fa-wallet"></i> {t.paymentMethod}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </div>
                               <div className="flex items-center gap-4">
-                                <span className={`font-black text-lg ${t.type === 'ingreso' ? 'text-emerald-600' : 'text-slate-800'}`}>
-                                  {t.type === 'ingreso' ? '+' : '-'}{formatARS(t.amount)}
-                                </span>
+                                {t.type === 'transferencia' ? (
+                                    <span className="font-black text-lg text-indigo-600">
+                                        <i className="fas fa-right-left text-sm mr-1 opacity-70"></i> {formatARS(t.amount)}
+                                    </span>
+                                ) : (
+                                    <span className={`font-black text-lg ${t.type === 'ingreso' ? 'text-emerald-600' : 'text-slate-800'}`}>
+                                      {t.type === 'ingreso' ? '+' : '-'}{formatARS(t.amount)}
+                                    </span>
+                                )}
                                 <button onClick={() => deleteTransaction(t.id)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
                                   <i className="fas fa-trash-can"></i>
                                 </button>
@@ -1226,6 +1318,72 @@
                   </div>
                 )}
               </main>
+
+              {/* MODAL TRASPASO INTERNO (PASAR PLATA) */}
+              {internalTransferModal && (
+                <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+                  <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden">
+                    <div className="p-4 flex justify-between items-center bg-indigo-600 text-white">
+                      <h3 className="font-bold flex items-center gap-2">
+                        <i className="fas fa-right-left text-xl"></i> Paso de Plata
+                      </h3>
+                      <button onClick={() => setInternalTransferModal(false)} className="text-white/80 hover:text-white bg-transparent p-1 rounded-full hover:bg-white/20 transition-colors">
+                        <i className="fas fa-xmark text-xl"></i>
+                      </button>
+                    </div>
+                    
+                    <form onSubmit={handleInternalTransferSubmit} className="p-6 space-y-4">
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">¿De dónde sale y a dónde va?</h4>
+                          <div className="space-y-3">
+                              <div>
+                                  <label className="block text-xs font-semibold text-slate-600 mb-1">Sale de (Origen)</label>
+                                  <select value={transferIntFrom} onChange={(e) => setTransferIntFrom(e.target.value)} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold">
+                                    {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                                  </select>
+                              </div>
+                              <div className="flex justify-center text-indigo-300 my-1"><i className="fas fa-arrow-down"></i></div>
+                              <div>
+                                  <label className="block text-xs font-semibold text-slate-600 mb-1">Entra a (Destino)</label>
+                                  <select value={transferIntTo} onChange={(e) => setTransferIntTo(e.target.value)} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold">
+                                    {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                                  </select>
+                              </div>
+                          </div>
+                      </div>
+
+                      <div>
+                          <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Monto a traspasar (ARS)</label>
+                          <input 
+                            type="text" 
+                            inputMode="numeric"
+                            value={transferIntAmount ? Number(transferIntAmount).toLocaleString('es-AR') : ''} 
+                            onChange={(e) => setTransferIntAmount(e.target.value.replace(/\D/g, ''))} 
+                            placeholder="0" 
+                            className="w-full p-3 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-xl text-indigo-700" 
+                            required 
+                          />
+                      </div>
+
+                      <div>
+                          <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Fecha</label>
+                          <input 
+                            type="date" 
+                            value={transferIntDate} 
+                            onChange={(e) => setTransferIntDate(e.target.value)} 
+                            className="w-full p-3 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-medium" 
+                            required 
+                          />
+                      </div>
+
+                      <div className="flex gap-3 pt-2">
+                        <button type="button" onClick={() => setInternalTransferModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-700 font-bold rounded-lg hover:bg-slate-200 transition-colors">Cancelar</button>
+                        <button type="submit" className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors">Confirmar Traspaso</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
 
               {/* MODAL TRANSFERENCIA A BÓVEDA */}
               {transferModal && (
