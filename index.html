@@ -165,7 +165,7 @@
 
           useEffect(() => {
             if (!user || !dbConfig) return;
-            const { collection, onSnapshot } = window.Firebase;
+            const { collection, onSnapshot, doc } = window.Firebase;
             const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
 
             const txRef = collection(dbConfig.db, 'artifacts', appId, 'public', 'data', 'transactions');
@@ -192,7 +192,14 @@
               setBudgets(data);
             }, (err) => console.error(err));
 
-            return () => { unsubTx(); unsubSav(); unsubCam(); unsubBud(); };
+            const setRef = doc(dbConfig.db, 'artifacts', appId, 'public', 'data', 'settings', 'general');
+            const unsubSet = onSnapshot(setRef, (docSnap) => {
+              if (docSnap.exists()) {
+                setReservedCash(docSnap.data().reservedCash || 0);
+              }
+            }, (err) => console.error(err));
+
+            return () => { unsubTx(); unsubSav(); unsubCam(); unsubBud(); unsubSet(); };
           }, [user, dbConfig]);
 
           useEffect(() => {
@@ -461,6 +468,16 @@
                  setBudgets({...budgets, [filterMonth]: budgetForm});
              }
              setEditingBudget(false);
+          };
+
+          const handleReservedCashBlur = async () => {
+            if (user && dbConfig) {
+                const { setDoc, doc } = window.Firebase;
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
+                try {
+                    await setDoc(doc(dbConfig.db, 'artifacts', appId, 'public', 'data', 'settings', 'general'), { reservedCash }, { merge: true });
+                } catch(err) { console.error("Error guardando efectivo reservado"); }
+            }
           };
 
           const openSavingsModal = (boxId, type) => {
@@ -1148,6 +1165,7 @@
                                   const val = e.target.value.replace(/\D/g, '');
                                   setReservedCash(val ? Number(val) : 0);
                                 }}
+                                onBlur={handleReservedCashBlur}
                                 className="w-24 bg-white border border-emerald-300 rounded text-right p-1 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500 text-emerald-800"
                               />
                             </div>
