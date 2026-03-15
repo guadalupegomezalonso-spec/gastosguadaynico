@@ -41,7 +41,7 @@
         const { useState, useMemo, useEffect } = React;
 
         // ESTRUCTURA DE CATEGORÍAS Y CUENTAS
-        const PAYMENT_METHODS = ['Efectivo Guada', 'Efectivo Nico', 'Cuenta Guada', 'Cuenta Nico'];
+        const PAYMENT_METHODS = ['Efectivo Guada', 'Efectivo Nico', 'Reserva de casa', 'Cuenta Guada', 'Cuenta Nico'];
         const SAVINGS_ACCOUNTS = ['USD CASA', 'USD BANCO GUADA', 'USD BANCO NICO', 'IOL GUADA', 'IOL GUADA USD', 'IOL NICO', 'IOL NICO USD', 'PESOS EFECTIVO'];
         const SAVINGS_BOXES = [
           { id: 'USD CASA', title: 'USD CASA', accounts: ['USD CASA'] },
@@ -81,6 +81,7 @@
           const [savingsAmount, setSavingsAmount] = useState('');
           const [savingsReason, setSavingsReason] = useState('');
           const [historyModal, setHistoryModal] = useState({ isOpen: false, boxId: '', accounts: [] });
+          const [incomeModalOpen, setIncomeModalOpen] = useState(false); // Modal Historial de Ingresos
 
           // Modal Transferencia a Bóveda
           const [transferModal, setTransferModal] = useState(false);
@@ -95,8 +96,6 @@
           const [transferIntTo, setTransferIntTo] = useState(PAYMENT_METHODS[1]);
           const [transferIntAmount, setTransferIntAmount] = useState('');
           const [transferIntDate, setTransferIntDate] = useState(new Date().toISOString().split('T')[0]);
-
-          const [reservedCash, setReservedCash] = useState(0); 
 
           const [type, setType] = useState('gastos_diarios');
           const [category, setCategory] = useState(STRUCTURE.gastos_diarios[0]);
@@ -192,14 +191,7 @@
               setBudgets(data);
             }, (err) => console.error(err));
 
-            const setRef = doc(dbConfig.db, 'artifacts', appId, 'public', 'data', 'settings', 'general');
-            const unsubSet = onSnapshot(setRef, (docSnap) => {
-              if (docSnap.exists()) {
-                setReservedCash(docSnap.data().reservedCash || 0);
-              }
-            }, (err) => console.error(err));
-
-            return () => { unsubTx(); unsubSav(); unsubCam(); unsubBud(); unsubSet(); };
+            return () => { unsubTx(); unsubSav(); unsubCam(); unsubBud(); };
           }, [user, dbConfig]);
 
           useEffect(() => {
@@ -217,17 +209,56 @@
             setTimeout(() => setErrorMsg(''), 4000);
           }
 
-          const filteredTransactions = useMemo(() => {
-            return transactions.filter(t => {
-              const safeDate = t.date || '';
-              const matchMonth = filterMonth === 'all' || (safeDate && safeDate.substring(0, 7) === filterMonth);
-              const matchType = filterType === 'all' || t.type === filterType;
-              return matchMonth && matchType;
-            }).sort((a, b) => {
-              const diff = new Date(b.date || 0) - new Date(a.date || 0);
-              return diff === 0 ? (b.createdAt || 0) - (a.createdAt || 0) : diff;
+          // Historial Unificado para el Flujo Diario (Transactions + Campo + Savings)
+          const unifiedHistory = useMemo(() => {
+            let combined = [];
+
+            // 1. Transacciones normales (Gastos, Ingresos, Transferencias)
+            transactions.forEach(t => {
+                combined.push({ ...t, dbCollection: 'transactions' });
             });
-          }, [transactions, filterMonth, filterType]);
+
+            // 2. Movimientos del Campo
+            campoTx.forEach(t => {
+                combined.push({
+                    ...t,
+                    dbCollection: 'campo',
+                    category: t.type === 'le_presto' ? 'Préstamo al Campo' : 'Ingreso del Campo',
+                    person: 'Ambos'
+                });
+            });
+
+            // 3. Movimientos manuales de Ahorro (Bóveda)
+            savingsTx.forEach(t => {
+                combined.push({
+                    ...t,
+                    dbCollection: 'savings',
+                    category: 'Movimiento Bóveda',
+                    paymentMethod: t.account,
+                    description: t.reason,
+                    person: 'Ambos',
+                    type: t.type === 'in' ? 'ahorro_in' : 'ahorro_out'
+                });
+            });
+
+            // Filtrado
+            return combined.filter(t => {
+                const safeDate = t.date || '';
+                const matchMonth = filterMonth === 'all' || safeDate.substring(0, 7) === filterMonth;
+                
+                let matchType = true;
+                if (filterType !== 'all') {
+                    if (filterType === 'campo') matchType = t.dbCollection === 'campo';
+                    else if (filterType === 'boveda') matchType = t.dbCollection === 'savings';
+                    else matchType = t.type === filterType && t.dbCollection === 'transactions';
+                }
+                
+                return matchMonth && matchType;
+            }).sort((a, b) => {
+                const diff = new Date(b.date || 0) - new Date(a.date || 0);
+                return diff === 0 ? (b.createdAt || 0) - (a.createdAt || 0) : diff;
+            });
+          }, [transactions, campoTx, savingsTx, filterMonth, filterType]);
 
           const sortedSavings = useMemo(() => {
             return savingsTx.sort((a, b) => {
@@ -244,7 +275,7 @@
           }, [campoTx]);
 
           const accountBalances = useMemo(() => {
-            const bals = { 'Efectivo': 0, 'Efectivo Guada': 0, 'Efectivo Nico': 0, 'Cuenta Guada': 0, 'Cuenta Nico': 0 };
+            const bals = { 'Efectivo': 0, 'Efectivo Guada': 0, 'Efectivo Nico': 0, 'Reserva de casa': 0, 'Cuenta Guada': 0, 'Cuenta Nico': 0 };
             transactions.forEach(t => {
               const method = t.paymentMethod || 'Efectivo';
               if (bals[method] === undefined) bals[method] = 0;
@@ -272,7 +303,7 @@
             return bals;
           }, [transactions, campoTx]);
 
-          const totalEfectivo = (accountBalances['Efectivo'] || 0) + (accountBalances['Efectivo Guada'] || 0) + (accountBalances['Efectivo Nico'] || 0);
+          const totalEfectivo = (accountBalances['Efectivo'] || 0) + (accountBalances['Efectivo Guada'] || 0) + (accountBalances['Efectivo Nico'] || 0) + (accountBalances['Reserva de casa'] || 0);
           const totalSaldos = (accountBalances['Cuenta Guada'] || 0) + (accountBalances['Cuenta Nico'] || 0) + totalEfectivo;
 
           const campoBalance = useMemo(() => {
@@ -324,7 +355,6 @@
               }
             });
 
-            // Solo 8 items en top fugas
             const sortedDiarios = Object.entries(topDiarios).sort(([, a], [, b]) => b - a).slice(0, 8);
             const sortedCatamarca = Object.entries(catamarcaBreakdown).sort(([, a], [, b]) => b - a);
             const capacityToSave = totalIngresos - totalGastos;
@@ -338,7 +368,6 @@
               'Expensas casa': false, 'Expensas terreno': false, 'Luz': false, 'Agua': false, 'Crédito auto': false, 'Crédito Hipotecario': false
             };
             
-            // Evaluamos TODAS las transacciones del mes, sin importar el filtro de vista ("filterType")
             transactions.forEach(t => {
               const safeDate = t.date || '';
               const matchMonth = filterMonth === 'all' || (safeDate && safeDate.substring(0, 7) === filterMonth);
@@ -362,7 +391,7 @@
             return balances;
           }, [savingsTx]);
 
-          // GUARDADO EN LA NUBE
+          // GUARDADO EN LA NUBE Y ELIMINACIÓN UNIFICADA
           const handleSubmit = async (e) => {
             e.preventDefault();
             if (!amount || Number(amount) <= 0) return;
@@ -385,6 +414,12 @@
               const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
               try { await deleteDoc(doc(dbConfig.db, 'artifacts', appId, 'public', 'data', 'transactions', id)); } catch (err) {}
             } else setTransactions(transactions.filter(t => t.id !== id));
+          };
+
+          const handleDeleteUnified = async (id, collectionName) => {
+            if (collectionName === 'transactions') await deleteTransaction(id);
+            else if (collectionName === 'campo') await deleteCampoTransaction(id);
+            else if (collectionName === 'savings') await deleteSavingsTransaction(id);
           };
 
           // GUARDADO TRASPASO INTERNO (PASAR PLATA)
@@ -468,16 +503,6 @@
                  setBudgets({...budgets, [filterMonth]: budgetForm});
              }
              setEditingBudget(false);
-          };
-
-          const handleReservedCashBlur = async () => {
-            if (user && dbConfig) {
-                const { setDoc, doc } = window.Firebase;
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'finanzas-guada-nico';
-                try {
-                    await setDoc(doc(dbConfig.db, 'artifacts', appId, 'public', 'data', 'settings', 'general'), { reservedCash }, { merge: true });
-                } catch(err) { console.error("Error guardando efectivo reservado"); }
-            }
           };
 
           const openSavingsModal = (boxId, type) => {
@@ -564,7 +589,7 @@
             return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=Registrar+Gastos+Diarios+%F0%9F%92%B8&details=Entrar+a+la+app+para+cargar+los+gastos+del+d%C3%ADa%3A+https%3A%2F%2Fresonant-kulfi-5e9674.netlify.app&dates=${dates}&recur=RRULE:FREQ=DAILY`;
           };
           
-          // Generar meses (incluyendo el mes que viene para poder setear presupuesto futuro)
+          // Generar meses
           const nextMonthObj = new Date(); nextMonthObj.setMonth(nextMonthObj.getMonth() + 1);
           const nextMonthString = nextMonthObj.toISOString().substring(0, 7);
           const availableMonths = [...new Set(transactions.map(t => t.date ? t.date.substring(0, 7) : null).filter(Boolean))];
@@ -577,9 +602,11 @@
             if (txType === 'pago_tarjetas') return <i className="fas fa-credit-card text-xl opacity-80"></i>;
             if (txType === 'gastos_casa') return <i className="fas fa-home text-xl opacity-80"></i>;
             if (txType === 'ahorro') return <i className="fas fa-piggy-bank text-xl opacity-80"></i>;
-            if (txType === 'le_presto') return <i className="fas fa-tractor text-xl opacity-80"></i>;
+            if (txType === 'le_presto') return <i className="fas fa-arrow-up-right-from-square text-xl opacity-80"></i>;
             if (txType === 'transferencia') return <i className="fas fa-right-left text-xl opacity-80"></i>;
             if (txType === 'catamarca') return <i className="fas fa-briefcase text-xl opacity-80"></i>;
+            if (txType === 'ahorro_in') return <i className="fas fa-circle-arrow-down text-xl opacity-80"></i>;
+            if (txType === 'ahorro_out') return <i className="fas fa-circle-arrow-up text-xl opacity-80"></i>;
             return <i className="fas fa-bag-shopping text-xl opacity-80"></i>;
           };
 
@@ -587,10 +614,11 @@
             if (txType === 'ingreso' || txType === 'me_presta') return 'bg-emerald-100 text-emerald-600';
             if (txType === 'pago_tarjetas') return 'bg-purple-100 text-purple-600';
             if (txType === 'gastos_casa') return 'bg-blue-100 text-blue-600';
-            if (txType === 'ahorro') return 'bg-teal-100 text-teal-600';
+            if (txType === 'ahorro' || txType === 'ahorro_in') return 'bg-teal-100 text-teal-600';
             if (txType === 'le_presto') return 'bg-amber-100 text-amber-600';
             if (txType === 'transferencia') return 'bg-indigo-100 text-indigo-600';
             if (txType === 'catamarca') return 'bg-cyan-100 text-cyan-700';
+            if (txType === 'ahorro_out') return 'bg-rose-100 text-rose-600';
             return 'bg-rose-100 text-rose-600';
           };
 
@@ -658,15 +686,18 @@
                     </div>
 
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                      {/* INGRESOS */}
-                      <div className="bg-emerald-50 rounded-2xl p-6 shadow-sm border border-emerald-100 flex flex-col justify-between">
+                      {/* INGRESOS - AHORA CON ONCLICK Y HOVER */}
+                      <div 
+                        onClick={() => setIncomeModalOpen(true)}
+                        className="bg-emerald-50 rounded-2xl p-6 shadow-sm border border-emerald-100 flex flex-col justify-between cursor-pointer hover:bg-emerald-100 transition-colors group"
+                      >
                         <div>
                           <div className="flex justify-between items-start mb-2">
                             <span className="font-bold text-emerald-800 uppercase tracking-wider text-xs">Ingresos del Mes</span>
-                            <i className="fas fa-arrow-trend-up text-xl text-emerald-400"></i>
+                            <i className="fas fa-arrow-trend-up text-xl text-emerald-400 group-hover:text-emerald-500 transition-colors"></i>
                           </div>
                           <span className="text-4xl font-black block text-emerald-700 mb-1">{formatARS(reportStats.totalIngresos)}</span>
-                          <p className="text-sm text-emerald-600/80">Todo el dinero que ingresó en este período.</p>
+                          <p className="text-sm text-emerald-600/80 flex items-center gap-1"><i className="fas fa-hand-pointer"></i> Tocar para ver detalle</p>
                         </div>
                       </div>
 
@@ -1148,33 +1179,24 @@
                           </div>
                           <span className="text-3xl font-black text-emerald-900 mb-2">{formatARS(totalEfectivo)}</span>
                           
-                          <div className="flex justify-between text-xs font-bold text-emerald-800 mb-4 px-2 bg-emerald-200/50 rounded py-1.5">
-                            <span>G: {formatARS(accountBalances['Efectivo Guada'] || 0)}</span>
-                            <span>N: {formatARS(accountBalances['Efectivo Nico'] || 0)}</span>
-                            {(accountBalances['Efectivo'] || 0) !== 0 && <span title="Efectivo previo sin asignar">?: {formatARS(accountBalances['Efectivo'])}</span>}
-                          </div>
-                          
-                          <div className="bg-white/60 rounded-xl p-3 border border-emerald-100 space-y-2">
+                          <div className="flex flex-col gap-1 text-xs font-bold text-emerald-800 mt-2 px-3 bg-emerald-200/50 rounded py-2">
                             <div className="flex justify-between items-center">
-                              <label className="text-xs font-bold text-emerald-700">Reservado (No tocar):</label>
-                              <input 
-                                type="text" 
-                                inputMode="numeric"
-                                value={reservedCash ? Number(reservedCash).toLocaleString('es-AR') : ''} 
-                                onChange={(e) => {
-                                  const val = e.target.value.replace(/\D/g, '');
-                                  setReservedCash(val ? Number(val) : 0);
-                                }}
-                                onBlur={handleReservedCashBlur}
-                                className="w-24 bg-white border border-emerald-300 rounded text-right p-1 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500 text-emerald-800"
-                              />
+                              <span><i className="fas fa-user text-[10px] mr-1 opacity-70"></i> Guada:</span> 
+                              <span>{formatARS(accountBalances['Efectivo Guada'] || 0)}</span>
                             </div>
-                            <div className="flex justify-between items-center pt-2 border-t border-emerald-200/50">
-                              <span className="text-xs font-bold text-slate-600">Disponible para gastar:</span>
-                              <span className={`font-black ${totalEfectivo - reservedCash < 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
-                                {formatARS(totalEfectivo - reservedCash)}
-                              </span>
+                            <div className="flex justify-between items-center">
+                              <span><i className="fas fa-user text-[10px] mr-1 opacity-70"></i> Nico:</span> 
+                              <span>{formatARS(accountBalances['Efectivo Nico'] || 0)}</span>
                             </div>
+                            <div className="flex justify-between items-center pt-1 border-t border-emerald-300/50 mt-1">
+                              <span><i className="fas fa-piggy-bank text-[10px] mr-1 opacity-70"></i> Reserva:</span> 
+                              <span className="text-sm">{formatARS(accountBalances['Reserva de casa'] || 0)}</span>
+                            </div>
+                            {(accountBalances['Efectivo'] || 0) !== 0 && (
+                                <div className="flex justify-between text-rose-600 border-t border-emerald-300 pt-1 mt-1">
+                                    <span title="Efectivo previo sin asignar">Sin asignar (?):</span> <span>{formatARS(accountBalances['Efectivo'])}</span>
+                                </div>
+                            )}
                           </div>
                         </div>
 
@@ -1267,10 +1289,10 @@
                             </div>
                         </div>
 
-                        {paymentMethod.includes('Efectivo') && type !== 'ingreso' && (totalEfectivo - reservedCash - Number(amount) < 0) && (
+                        {(accountBalances[paymentMethod] || 0) - Number(amount) < 0 && type !== 'ingreso' && type !== 'transferencia' && (
                           <div className="bg-amber-50 text-amber-800 p-3 rounded-lg text-xs flex items-start gap-2 border border-amber-200">
                             <i className="fas fa-triangle-exclamation text-base mt-0.5 shrink-0"></i>
-                            <div>Estás gastando dinero de tu <b>Efectivo Reservado</b>. Tu saldo disponible para gastar en efectivo quedará en negativo.</div>
+                            <div>Estás gastando más plata de la que tenés registrada en <b>{paymentMethod}</b>. Tu saldo quedará en negativo.</div>
                           </div>
                         )}
 
@@ -1280,10 +1302,10 @@
                       </form>
                     </section>
 
-                    {/* 3. MOVIMIENTOS GUARDADOS */}
+                    {/* 3. MOVIMIENTOS GUARDADOS (HISTORIAL UNIFICADO) */}
                     <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
                       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-                        <h2 className="text-lg font-bold">Movimientos Guardados</h2>
+                        <h2 className="text-lg font-bold">Todos los Movimientos (Historial Unificado)</h2>
                         <div className="flex bg-slate-100 rounded-lg p-1 flex-wrap gap-1 w-full md:w-auto">
                           <button onClick={() => setFilterType('all')} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === 'all' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Todos</button>
                           {Object.keys(STRUCTURE).map(ft => (
@@ -1291,59 +1313,66 @@
                               {TYPE_LABELS[ft]}
                             </button>
                           ))}
+                          <button onClick={() => setFilterType('campo')} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === 'campo' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Campo</button>
+                          <button onClick={() => setFilterType('boveda')} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === 'boveda' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Bóveda</button>
                         </div>
                       </div>
 
-                      {filteredTransactions.length === 0 ? (
+                      {unifiedHistory.length === 0 ? (
                           <div className="text-center py-12 text-slate-400">
                             <i className="fas fa-list text-5xl mx-auto mb-3 opacity-20 block"></i>
                             <p>No hay movimientos para este filtro.</p>
                           </div>
                         ) : (
                         <div className="space-y-3 overflow-y-auto max-h-[500px] pr-2">
-                          {filteredTransactions.map(t => (
-                            <div key={t.id} className="group flex items-center justify-between p-4 rounded-xl border border-slate-100 hover:border-slate-200 hover:shadow-sm transition-all bg-slate-50 hover:bg-white">
-                              <div className="flex items-center gap-4">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${getTypeColor(t.type)}`}>
-                                  {getTypeIcon(t.type)}
+                          {unifiedHistory.map(t => {
+                            const isNeutral = t.type === 'transferencia';
+                            const isPositive = t.type === 'ingreso' || t.type === 'me_presta' || t.type === 'ahorro_in';
+                            
+                            return (
+                              <div key={`${t.dbCollection}-${t.id}`} className="group flex items-center justify-between p-4 rounded-xl border border-slate-100 hover:border-slate-200 hover:shadow-sm transition-all bg-slate-50 hover:bg-white">
+                                <div className="flex items-center gap-4">
+                                  <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${getTypeColor(t.type)}`}>
+                                    {getTypeIcon(t.type)}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <h3 className="font-bold text-slate-800">{t.category}</h3>
+                                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
+                                        {t.person}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                      <p className="text-sm text-slate-500">{t.description || 'Sin descripción'} • {t.date ? new Date(t.date).toLocaleDateString('es-AR') : 'Sin fecha'}</p>
+                                      {isNeutral ? (
+                                        <span className="text-[10px] font-bold flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                          {t.paymentMethod} <i className="fas fa-arrow-right text-[8px]"></i> {t.transferTo}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] font-bold flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                          <i className="fas fa-wallet"></i> {t.paymentMethod}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
                                 </div>
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <h3 className="font-bold text-slate-800">{t.category}</h3>
-                                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">
-                                      {t.person}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                    <p className="text-sm text-slate-500">{t.description || 'Sin descripción'} • {t.date ? new Date(t.date).toLocaleDateString('es-AR') : 'Sin fecha'}</p>
-                                    {t.type === 'transferencia' ? (
-                                      <span className="text-[10px] font-bold flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
-                                        {t.paymentMethod} <i className="fas fa-arrow-right text-[8px]"></i> {t.transferTo}
+                                <div className="flex items-center gap-4">
+                                  {isNeutral ? (
+                                      <span className="font-black text-lg text-indigo-600">
+                                          <i className="fas fa-right-left text-sm mr-1 opacity-70"></i> {formatARS(t.amount)}
                                       </span>
-                                    ) : (
-                                      <span className="text-[10px] font-bold flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                                        <i className="fas fa-wallet"></i> {t.paymentMethod}
+                                  ) : (
+                                      <span className={`font-black text-lg ${isPositive ? 'text-emerald-600' : 'text-slate-800'}`}>
+                                        {isPositive ? '+' : '-'}{formatARS(t.amount)}
                                       </span>
-                                    )}
-                                  </div>
+                                  )}
+                                  <button onClick={() => handleDeleteUnified(t.id, t.dbCollection)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all" title="Eliminar Movimiento">
+                                    <i className="fas fa-trash-can"></i>
+                                  </button>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-4">
-                                {t.type === 'transferencia' ? (
-                                    <span className="font-black text-lg text-indigo-600">
-                                        <i className="fas fa-right-left text-sm mr-1 opacity-70"></i> {formatARS(t.amount)}
-                                    </span>
-                                ) : (
-                                    <span className={`font-black text-lg ${t.type === 'ingreso' ? 'text-emerald-600' : 'text-slate-800'}`}>
-                                      {t.type === 'ingreso' ? '+' : '-'}{formatARS(t.amount)}
-                                    </span>
-                                )}
-                                <button onClick={() => deleteTransaction(t.id)} className="p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all">
-                                  <i className="fas fa-trash-can"></i>
-                                </button>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </section>
@@ -1381,6 +1410,43 @@
                   </div>
                 )}
               </main>
+
+              {/* ======================= MODALES GLOBALES ======================= */}
+
+              {/* MODAL HISTORIAL DE INGRESOS */}
+              {incomeModalOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+                  <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden flex flex-col max-h-[80vh]">
+                    <div className="p-4 flex justify-between items-center bg-emerald-600 text-white">
+                      <h3 className="font-bold flex items-center gap-2">
+                        <i className="fas fa-arrow-trend-up"></i> Historial de Ingresos
+                      </h3>
+                      <button onClick={() => setIncomeModalOpen(false)} className="text-white/80 hover:text-white bg-transparent p-1 rounded-full hover:bg-white/20 transition-colors">
+                        <i className="fas fa-xmark text-xl"></i>
+                      </button>
+                    </div>
+                    <div className="p-4 overflow-y-auto flex-1 bg-slate-50 space-y-3">
+                      {(() => {
+                         const incomes = transactions.filter(t => t.type === 'ingreso' && (filterMonth === 'all' || (t.date && t.date.substring(0, 7) === filterMonth)))
+                                                     .sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0));
+                         if (incomes.length === 0) return <p className="text-center text-slate-500 py-8 font-medium">No hay ingresos registrados en este mes.</p>;
+                         return incomes.map(t => (
+                          <div key={t.id} className="flex justify-between items-center p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
+                            <div>
+                              <h4 className="font-bold text-slate-800 text-sm">{t.category}</h4>
+                              <p className="text-xs text-slate-500 mt-1">{t.description || 'Sin descripción'}</p>
+                              <p className="text-[11px] font-bold text-slate-400 mt-1">
+                                <i className="far fa-calendar-alt"></i> {new Date(t.date).toLocaleDateString('es-AR')} • {t.paymentMethod}
+                              </p>
+                            </div>
+                            <span className="font-black text-emerald-600 text-lg">+{formatARS(t.amount)}</span>
+                          </div>
+                         ));
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* MODAL TRASPASO INTERNO (PASAR PLATA) */}
               {internalTransferModal && (
