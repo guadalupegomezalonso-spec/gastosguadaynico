@@ -115,6 +115,7 @@
           const currentMonthString = new Date().toISOString().substring(0, 7);
           const [filterMonth, setFilterMonth] = useState(currentMonthString);
           const [filterType, setFilterType] = useState('all');
+          const [filterCategory, setFilterCategory] = useState('all'); // NUEVO ESTADO PARA EL FILTRO DE CATEGORÍAS
           
           const [errorMsg, setErrorMsg] = useState('');
           const [user, setUser] = useState(null);
@@ -253,12 +254,25 @@
                     else matchType = t.type === filterType && t.dbCollection === 'transactions';
                 }
                 
-                return matchMonth && matchType;
+                let matchCategory = true;
+                if (filterCategory !== 'all') {
+                    matchCategory = t.category === filterCategory;
+                }
+                
+                return matchMonth && matchType && matchCategory;
             }).sort((a, b) => {
                 const diff = new Date(b.date || 0) - new Date(a.date || 0);
                 return diff === 0 ? (b.createdAt || 0) - (a.createdAt || 0) : diff;
             });
-          }, [transactions, campoTx, savingsTx, filterMonth, filterType]);
+          }, [transactions, campoTx, savingsTx, filterMonth, filterType, filterCategory]);
+
+          // Generar lista de categorías disponibles según el tipo seleccionado
+          const availableFilterCategories = useMemo(() => {
+              if (filterType === 'all') return [];
+              if (filterType === 'campo') return ['Préstamo al Campo', 'Ingreso del Campo'];
+              if (filterType === 'boveda') return ['Movimiento Bóveda'];
+              return STRUCTURE[filterType] || [];
+          }, [filterType]);
 
           const sortedSavings = useMemo(() => {
             return savingsTx.sort((a, b) => {
@@ -574,6 +588,13 @@
           const getCurrencyFormatter = (accountName) => accountName.includes('USD') ? formatUSD : formatARS;
           const isUSD = (accountName) => accountName.includes('USD');
           
+          const formatDisplayDate = (dateStr) => {
+              if (!dateStr) return 'Sin fecha';
+              const parts = dateStr.split('T')[0].split('-');
+              if (parts.length !== 3) return 'Sin fecha';
+              return `${parts[2]}/${parts[1]}/${parts[0]}`;
+          };
+
           const calcDiff = (curr, prev) => {
             if (prev === 0) return curr > 0 ? '+100%' : '0%';
             const diff = ((curr - prev) / prev) * 100;
@@ -1109,7 +1130,7 @@
                                     <div>
                                       <h3 className="font-bold text-slate-800 text-base">{t.description}</h3>
                                       <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                                        <p className="text-sm text-slate-500"><i className="far fa-calendar-alt mr-1"></i> {new Date(t.date).toLocaleDateString('es-AR')}</p>
+                                        <p className="text-sm text-slate-500"><i className="far fa-calendar-alt mr-1"></i> {formatDisplayDate(t.date)}</p>
                                         <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-200 text-slate-700 flex items-center gap-1">
                                            <i className="fas fa-wallet"></i> {t.paymentMethod}
                                         </span>
@@ -1306,15 +1327,34 @@
                     <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
                       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                         <h2 className="text-lg font-bold">Todos los Movimientos (Historial Unificado)</h2>
-                        <div className="flex bg-slate-100 rounded-lg p-1 flex-wrap gap-1 w-full md:w-auto">
-                          <button onClick={() => setFilterType('all')} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === 'all' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Todos</button>
-                          {Object.keys(STRUCTURE).map(ft => (
-                            <button key={ft} onClick={() => setFilterType(ft)} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === ft ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
-                              {TYPE_LABELS[ft]}
-                            </button>
-                          ))}
-                          <button onClick={() => setFilterType('campo')} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === 'campo' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Campo</button>
-                          <button onClick={() => setFilterType('boveda')} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === 'boveda' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Bóveda</button>
+                        
+                        <div className="flex flex-col items-end gap-2 w-full md:w-auto">
+                          <div className="flex bg-slate-100 rounded-lg p-1 flex-wrap gap-1 w-full md:w-auto justify-end">
+                            <button onClick={() => { setFilterType('all'); setFilterCategory('all'); }} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === 'all' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Todos</button>
+                            {Object.keys(STRUCTURE).map(ft => (
+                              <button key={ft} onClick={() => { setFilterType(ft); setFilterCategory('all'); }} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === ft ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>
+                                {TYPE_LABELS[ft]}
+                              </button>
+                            ))}
+                            <button onClick={() => { setFilterType('campo'); setFilterCategory('all'); }} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === 'campo' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Campo</button>
+                            <button onClick={() => { setFilterType('boveda'); setFilterCategory('all'); }} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === 'boveda' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Bóveda</button>
+                          </div>
+                          
+                          {availableFilterCategories.length > 0 && (
+                            <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 w-full md:w-auto justify-end">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">Filtrar por:</span>
+                                <select 
+                                    value={filterCategory} 
+                                    onChange={(e) => setFilterCategory(e.target.value)} 
+                                    className="p-1.5 text-xs font-bold rounded-lg bg-slate-50 border border-slate-200 text-slate-700 outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+                                >
+                                    <option value="all">Todas las categorías</option>
+                                    {availableFilterCategories.map(c => (
+                                        <option key={c} value={c}>{c}</option>
+                                    ))}
+                                </select>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -1343,7 +1383,7 @@
                                       </span>
                                     </div>
                                     <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                      <p className="text-sm text-slate-500">{t.description || 'Sin descripción'} • {t.date ? new Date(t.date).toLocaleDateString('es-AR') : 'Sin fecha'}</p>
+                                      <p className="text-sm text-slate-500">{t.description || 'Sin descripción'} • {formatDisplayDate(t.date)}</p>
                                       {isNeutral ? (
                                         <span className="text-[10px] font-bold flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
                                           {t.paymentMethod} <i className="fas fa-arrow-right text-[8px]"></i> {t.transferTo}
@@ -1436,7 +1476,7 @@
                               <h4 className="font-bold text-slate-800 text-sm">{t.category}</h4>
                               <p className="text-xs text-slate-500 mt-1">{t.description || 'Sin descripción'}</p>
                               <p className="text-[11px] font-bold text-slate-400 mt-1">
-                                <i className="far fa-calendar-alt"></i> {new Date(t.date).toLocaleDateString('es-AR')} • {t.paymentMethod}
+                                <i className="far fa-calendar-alt"></i> {formatDisplayDate(t.date)} • {t.paymentMethod}
                               </p>
                             </div>
                             <span className="font-black text-emerald-600 text-lg">+{formatARS(t.amount)}</span>
@@ -1681,7 +1721,7 @@
                                   </span>
                                 )}
                                 <p className="text-sm font-medium text-slate-800 mt-1">{tx.reason}</p>
-                                <p className="text-xs text-slate-500 mt-0.5"><i className="far fa-calendar-alt"></i> {tx.date ? new Date(tx.date).toLocaleDateString('es-AR') : 'Sin fecha'}</p>
+                                <p className="text-xs text-slate-500 mt-0.5"><i className="far fa-calendar-alt"></i> {formatDisplayDate(tx.date)}</p>
                               </div>
                               <span className={`font-black text-lg ${tx.type === 'in' ? 'text-emerald-600' : 'text-rose-600'}`}>
                                 {tx.type === 'in' ? '+' : '-'}{getCurrencyFormatter(tx.account)(tx.amount)}
