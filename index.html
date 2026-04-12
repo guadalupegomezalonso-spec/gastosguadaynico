@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -116,6 +116,8 @@
           const [filterMonth, setFilterMonth] = useState(currentMonthString);
           const [filterType, setFilterType] = useState('all');
           const [filterCategory, setFilterCategory] = useState('all'); // NUEVO ESTADO PARA EL FILTRO DE CATEGORÍAS
+          const [filterPerson, setFilterPerson] = useState('all'); // NUEVO ESTADO PARA EL FILTRO DE PERSONA
+          const [filterExactDate, setFilterExactDate] = useState(''); // NUEVO ESTADO PARA EL FILTRO DE FECHA EXACTA
           
           const [errorMsg, setErrorMsg] = useState('');
           const [user, setUser] = useState(null);
@@ -258,13 +260,23 @@
                 if (filterCategory !== 'all') {
                     matchCategory = t.category === filterCategory;
                 }
+
+                let matchPerson = true;
+                if (filterPerson !== 'all') {
+                    matchPerson = t.person === filterPerson;
+                }
+
+                let matchExactDate = true;
+                if (filterExactDate) {
+                    matchExactDate = t.date === filterExactDate;
+                }
                 
-                return matchMonth && matchType && matchCategory;
+                return matchMonth && matchType && matchCategory && matchPerson && matchExactDate;
             }).sort((a, b) => {
                 const diff = new Date(b.date || 0) - new Date(a.date || 0);
                 return diff === 0 ? (b.createdAt || 0) - (a.createdAt || 0) : diff;
             });
-          }, [transactions, campoTx, savingsTx, filterMonth, filterType, filterCategory]);
+          }, [transactions, campoTx, savingsTx, filterMonth, filterType, filterCategory, filterPerson, filterExactDate]);
 
           // Generar lista de categorías disponibles según el tipo seleccionado
           const availableFilterCategories = useMemo(() => {
@@ -1328,7 +1340,8 @@
                       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                         <h2 className="text-lg font-bold">Todos los Movimientos (Historial Unificado)</h2>
                         
-                        <div className="flex flex-col items-end gap-2 w-full md:w-auto">
+                        <div className="flex flex-col items-end gap-3 w-full md:w-auto">
+                          {/* Fila 1: Botones de Tipo */}
                           <div className="flex bg-slate-100 rounded-lg p-1 flex-wrap gap-1 w-full md:w-auto justify-end">
                             <button onClick={() => { setFilterType('all'); setFilterCategory('all'); }} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === 'all' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Todos</button>
                             {Object.keys(STRUCTURE).map(ft => (
@@ -1340,21 +1353,57 @@
                             <button onClick={() => { setFilterType('boveda'); setFilterCategory('all'); }} className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${filterType === 'boveda' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Bóveda</button>
                           </div>
                           
-                          {availableFilterCategories.length > 0 && (
-                            <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-2 w-full md:w-auto justify-end">
-                                <span className="text-[10px] font-bold text-slate-400 uppercase">Filtrar por:</span>
+                          {/* Fila 2: Filtros Adicionales (Fecha, Persona, Categoría) */}
+                          <div className="flex flex-wrap items-center gap-2 justify-end w-full animate-in fade-in slide-in-from-top-2">
+                            
+                            {/* Filtro Fecha Exacta */}
+                            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+                              <i className="far fa-calendar-alt text-slate-400 text-xs"></i>
+                              <input 
+                                type="date" 
+                                value={filterExactDate} 
+                                onChange={(e) => setFilterExactDate(e.target.value)} 
+                                className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
+                              />
+                              {filterExactDate && (
+                                <button onClick={() => setFilterExactDate('')} className="text-slate-400 hover:text-rose-500 ml-1" title="Borrar fecha">
+                                   <i className="fas fa-times text-xs"></i>
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Filtro Persona */}
+                            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+                                <i className="fas fa-user text-slate-400 text-xs"></i>
                                 <select 
-                                    value={filterCategory} 
-                                    onChange={(e) => setFilterCategory(e.target.value)} 
-                                    className="p-1.5 text-xs font-bold rounded-lg bg-slate-50 border border-slate-200 text-slate-700 outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+                                    value={filterPerson} 
+                                    onChange={(e) => setFilterPerson(e.target.value)} 
+                                    className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
                                 >
-                                    <option value="all">Todas las categorías</option>
-                                    {availableFilterCategories.map(c => (
-                                        <option key={c} value={c}>{c}</option>
-                                    ))}
+                                    <option value="all">Cualquiera</option>
+                                    <option value="Guada">Guada</option>
+                                    <option value="Nico">Nico</option>
+                                    <option value="Ambos">Ambos</option>
                                 </select>
                             </div>
-                          )}
+
+                            {/* Filtro Categoría */}
+                            {availableFilterCategories.length > 0 && (
+                              <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1">
+                                  <i className="fas fa-tag text-slate-400 text-xs"></i>
+                                  <select 
+                                      value={filterCategory} 
+                                      onChange={(e) => setFilterCategory(e.target.value)} 
+                                      className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
+                                  >
+                                      <option value="all">Todas las categorías</option>
+                                      {availableFilterCategories.map(c => (
+                                          <option key={c} value={c}>{c}</option>
+                                      ))}
+                                  </select>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
 
