@@ -1,4 +1,4 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -69,6 +69,8 @@
           catamarca: ['Super/almacén/comida', 'Nafta', 'Gastos Casa', 'Delivery', 'Kiosco', 'Otros']
         };
         const TYPE_LABELS = { ingreso: 'Ingreso', pago_tarjetas: 'Pago tarjetas', gastos_casa: 'Pagos casa', gastos_diarios: 'Gastos diarios', ahorro: 'Ahorro / Inversión', transferencia: 'Pasos de Plata', catamarca: 'Catamarca' };
+        
+        const CHART_COLORS = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
 
         function App() {
           const [activeTab, setActiveTab] = useState('dashboard');
@@ -126,6 +128,12 @@
           // Estado para Edición de Presupuestos
           const [editingBudget, setEditingBudget] = useState(false);
           const [budgetForm, setBudgetForm] = useState({ pago_tarjetas: 0, gastos_casa: 0, gastos_diarios: 0 });
+
+          // NUEVOS ESTADOS: Gráfico de Evolución Mensual
+          const [chartLines, setChartLines] = useState([]);
+          const [newLineType, setNewLineType] = useState('all');
+          const [newLineCategory, setNewLineCategory] = useState('all');
+          const [newLineMethod, setNewLineMethod] = useState('all');
 
           // CONFIGURACIÓN DE FIREBASE
           const dbConfig = useMemo(() => {
@@ -211,6 +219,66 @@
             setErrorMsg(msg);
             setTimeout(() => setErrorMsg(''), 4000);
           }
+
+          // LÓGICA PARA EL GRÁFICO DE EVOLUCIÓN
+          const availableMonthsAll = useMemo(() => {
+            const m = [...new Set(transactions.map(t => t.date ? t.date.substring(0, 7) : null).filter(Boolean))];
+            if (!m.includes(currentMonthString)) m.push(currentMonthString);
+            return m.sort().reverse();
+          }, [transactions, currentMonthString]);
+
+          const availableChartCategories = useMemo(() => {
+              if (newLineType === 'all') return [];
+              return STRUCTURE[newLineType] || [];
+          }, [newLineType]);
+
+          const chartData = useMemo(() => {
+              const plotMonths = [...availableMonthsAll].slice(0, 6).reverse(); // Últimos 6 meses
+              if (plotMonths.length === 0) return { months: [], lines: [], maxVal: 100 };
+
+              let allTx = [];
+              transactions.forEach(t => allTx.push({...t, safeType: t.type}));
+
+              const linesData = chartLines.map((line, idx) => {
+                  const color = CHART_COLORS[idx % CHART_COLORS.length];
+                  const dataPoints = plotMonths.map(month => {
+                      let sum = 0;
+                      allTx.forEach(t => {
+                          const tMonth = (t.date || '').substring(0, 7);
+                          if (tMonth !== month) return;
+                          
+                          let match = true;
+                          if (line.type !== 'all' && t.safeType !== line.type) match = false;
+                          if (line.category !== 'all' && t.category !== line.category) match = false;
+                          if (line.method !== 'all' && t.paymentMethod !== line.method) match = false;
+                          
+                          if (match) sum += Number(t.amount || 0);
+                      });
+                      return sum;
+                  });
+                  return { ...line, color, dataPoints };
+              });
+
+              const maxVal = Math.max(...linesData.flatMap(l => l.dataPoints), 100);
+              return { months: plotMonths, lines: linesData, maxVal };
+          }, [transactions, chartLines, availableMonthsAll]);
+
+          const addChartLine = () => {
+              if (chartLines.length >= 3) return;
+              const newId = `${newLineType}-${newLineCategory}-${newLineMethod}-${Date.now()}`;
+              
+              let labelParts = [];
+              if (newLineType !== 'all') labelParts.push(TYPE_LABELS[newLineType] || newLineType);
+              if (newLineCategory !== 'all') labelParts.push(newLineCategory);
+              if (newLineMethod !== 'all') labelParts.push(newLineMethod);
+              const label = labelParts.length > 0 ? labelParts.join(' + ') : 'Todos los mov.';
+              
+              setChartLines([...chartLines, { id: newId, type: newLineType, category: newLineCategory, method: newLineMethod, label }]);
+          };
+
+          const removeChartLine = (id) => {
+              setChartLines(chartLines.filter(l => l.id !== id));
+          };
 
           // Historial Unificado para el Flujo Diario (Transactions + Campo + Savings)
           const unifiedHistory = useMemo(() => {
@@ -635,7 +703,7 @@
             if (txType === 'pago_tarjetas') return <i className="fas fa-credit-card text-xl opacity-80"></i>;
             if (txType === 'gastos_casa') return <i className="fas fa-home text-xl opacity-80"></i>;
             if (txType === 'ahorro') return <i className="fas fa-piggy-bank text-xl opacity-80"></i>;
-            if (txType === 'le_presto') return <i className="fas fa-arrow-up-right-from-square text-xl opacity-80"></i>;
+            if (txType === 'le_presto') return <i className="fas fa-tractor text-xl opacity-80"></i>;
             if (txType === 'transferencia') return <i className="fas fa-right-left text-xl opacity-80"></i>;
             if (txType === 'catamarca') return <i className="fas fa-briefcase text-xl opacity-80"></i>;
             if (txType === 'ahorro_in') return <i className="fas fa-circle-arrow-down text-xl opacity-80"></i>;
@@ -694,7 +762,7 @@
                     </div>
                   </div>
 
-                  {activeTab !== 'ahorros' && activeTab !== 'campo' && (
+                  {(activeTab === 'dashboard' || activeTab === 'reporte') && (
                     <div className="mt-6 flex items-center justify-end gap-2 bg-teal-800/50 w-fit ml-auto px-4 py-2 rounded-full text-sm font-medium border border-teal-600">
                       <i className="fas fa-calendar-alt text-teal-200"></i>
                       <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="bg-transparent border-none outline-none cursor-pointer text-white font-bold">
@@ -969,6 +1037,117 @@
                           })}
                         </div>
                       )}
+                    </div>
+
+                    {/* GRÁFICO DE EVOLUCIÓN PERSONALIZADO */}
+                    <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mt-6">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                    <i className="fas fa-chart-line text-indigo-500"></i> Evolución Mensual Personalizada
+                                </h3>
+                                <p className="text-xs text-slate-500 mt-1">Compará hasta 3 variables a lo largo de los últimos 6 meses.</p>
+                            </div>
+                        </div>
+
+                        {/* Controles */}
+                        <div className="flex flex-col md:flex-row gap-4 items-end mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                            <div className="flex-1 w-full">
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo</label>
+                                <select value={newLineType} onChange={(e) => { setNewLineType(e.target.value); setNewLineCategory('all'); }} className="w-full p-2 bg-white border border-slate-300 rounded-lg outline-none text-sm">
+                                    <option value="all">Todos</option>
+                                    {Object.keys(STRUCTURE).map(t => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
+                                </select>
+                            </div>
+                            <div className="flex-1 w-full">
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Categoría</label>
+                                <select value={newLineCategory} onChange={(e) => setNewLineCategory(e.target.value)} className="w-full p-2 bg-white border border-slate-300 rounded-lg outline-none text-sm" disabled={newLineType === 'all'}>
+                                    <option value="all">Todas</option>
+                                    {availableChartCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                            </div>
+                            <div className="flex-1 w-full">
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Medio de Pago</label>
+                                <select value={newLineMethod} onChange={(e) => setNewLineMethod(e.target.value)} className="w-full p-2 bg-white border border-slate-300 rounded-lg outline-none text-sm">
+                                    <option value="all">Todos</option>
+                                    {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                                </select>
+                            </div>
+                            <button onClick={addChartLine} disabled={chartLines.length >= 3} className="w-full md:w-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold rounded-lg transition-colors text-sm">
+                                Sumar al gráfico
+                            </button>
+                        </div>
+
+                        {/* Badges */}
+                        <div className="flex flex-wrap gap-2 mb-6">
+                            {chartLines.map((line, idx) => (
+                                <div key={line.id} className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border" style={{ backgroundColor: `${line.color}15`, borderColor: line.color, color: line.color }}>
+                                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }}></div>
+                                    {line.label}
+                                    <button onClick={() => removeChartLine(line.id)} className="ml-1 opacity-60 hover:opacity-100"><i className="fas fa-times"></i></button>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* SVG Chart */}
+                        <div className="w-full overflow-x-auto">
+                            <div className="min-w-[600px] h-[300px]">
+                                <svg viewBox="0 0 800 300" className="w-full h-full">
+                                    {/* Grilla y Eje Y */}
+                                    {[0, 0.25, 0.5, 0.75, 1].map(pct => {
+                                        const y = 260 - (pct * 240);
+                                        const safeMax = Math.max(chartData.maxVal, 100);
+                                        const val = safeMax * pct;
+                                        return (
+                                            <g key={pct}>
+                                                <line x1="60" y1={y} x2="780" y2={y} stroke="#e2e8f0" strokeDasharray="4 4" />
+                                                <text x="50" y={y + 4} textAnchor="end" className="text-[10px] fill-slate-400 font-medium">
+                                                    {val >= 1000 ? `${(val/1000).toFixed(0)}k` : Math.round(val)}
+                                                </text>
+                                            </g>
+                                        )
+                                    })}
+                                    {/* Eje X */}
+                                    {chartData.months.map((m, i) => {
+                                        const x = 80 + (i * (700 / Math.max(1, chartData.months.length - 1)));
+                                        const [year, month] = m.split('-');
+                                        const monthName = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'][parseInt(month)-1];
+                                        return (
+                                            <g key={m}>
+                                                <text x={x} y="285" textAnchor="middle" className="text-xs fill-slate-500 font-bold">{monthName} {year.slice(-2)}</text>
+                                            </g>
+                                        )
+                                    })}
+                                    {/* Líneas */}
+                                    {chartData.lines.map(line => {
+                                        const safeMax = Math.max(chartData.maxVal, 100);
+                                        const points = line.dataPoints.map((val, i) => {
+                                            const x = 80 + (i * (700 / Math.max(1, chartData.months.length - 1)));
+                                            const y = 260 - ((val / safeMax) * 240);
+                                            return `${x},${y}`;
+                                        }).join(' L ');
+                                        
+                                        return (
+                                            <g key={line.id}>
+                                                <path d={`M ${points}`} fill="none" stroke={line.color} strokeWidth="3" opacity="0.8" strokeLinecap="round" strokeLinejoin="round" />
+                                                {line.dataPoints.map((val, i) => {
+                                                    const x = 80 + (i * (700 / Math.max(1, chartData.months.length - 1)));
+                                                    const y = 260 - ((val / safeMax) * 240);
+                                                    return (
+                                                        <circle key={i} cx={x} cy={y} r="4" fill="white" stroke={line.color} strokeWidth="2" className="cursor-pointer transition-all duration-200">
+                                                            <title>{`${line.label} en ${chartData.months[i]}: $${val.toLocaleString('es-AR')}`}</title>
+                                                        </circle>
+                                                    );
+                                                })}
+                                            </g>
+                                        )
+                                    })}
+                                    {chartLines.length === 0 && (
+                                        <text x="400" y="150" textAnchor="middle" className="text-sm fill-slate-400">Seleccioná variables arriba para comparar (Max 3)</text>
+                                    )}
+                                </svg>
+                            </div>
+                        </div>
                     </div>
                   </div>
                 )}
@@ -1500,109 +1679,6 @@
                 )}
               </main>
 
-              {/* ======================= MODALES GLOBALES ======================= */}
-
-              {/* MODAL HISTORIAL DE INGRESOS */}
-              {incomeModalOpen && (
-                <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-                  <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden flex flex-col max-h-[80vh]">
-                    <div className="p-4 flex justify-between items-center bg-emerald-600 text-white">
-                      <h3 className="font-bold flex items-center gap-2">
-                        <i className="fas fa-arrow-trend-up"></i> Historial de Ingresos
-                      </h3>
-                      <button onClick={() => setIncomeModalOpen(false)} className="text-white/80 hover:text-white bg-transparent p-1 rounded-full hover:bg-white/20 transition-colors">
-                        <i className="fas fa-xmark text-xl"></i>
-                      </button>
-                    </div>
-                    <div className="p-4 overflow-y-auto flex-1 bg-slate-50 space-y-3">
-                      {(() => {
-                         const incomes = transactions.filter(t => t.type === 'ingreso' && (filterMonth === 'all' || (t.date && t.date.substring(0, 7) === filterMonth)))
-                                                     .sort((a,b) => new Date(b.date || 0) - new Date(a.date || 0));
-                         if (incomes.length === 0) return <p className="text-center text-slate-500 py-8 font-medium">No hay ingresos registrados en este mes.</p>;
-                         return incomes.map(t => (
-                          <div key={t.id} className="flex justify-between items-center p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
-                            <div>
-                              <h4 className="font-bold text-slate-800 text-sm">{t.category}</h4>
-                              <p className="text-xs text-slate-500 mt-1">{t.description || 'Sin descripción'}</p>
-                              <p className="text-[11px] font-bold text-slate-400 mt-1">
-                                <i className="far fa-calendar-alt"></i> {formatDisplayDate(t.date)} • {t.paymentMethod}
-                              </p>
-                            </div>
-                            <span className="font-black text-emerald-600 text-lg">+{formatARS(t.amount)}</span>
-                          </div>
-                         ));
-                      })()}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* MODAL TRASPASO INTERNO (PASAR PLATA) */}
-              {internalTransferModal && (
-                <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-                  <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden">
-                    <div className="p-4 flex justify-between items-center bg-indigo-600 text-white">
-                      <h3 className="font-bold flex items-center gap-2">
-                        <i className="fas fa-right-left text-xl"></i> Paso de Plata
-                      </h3>
-                      <button onClick={() => setInternalTransferModal(false)} className="text-white/80 hover:text-white bg-transparent p-1 rounded-full hover:bg-white/20 transition-colors">
-                        <i className="fas fa-xmark text-xl"></i>
-                      </button>
-                    </div>
-                    
-                    <form onSubmit={handleInternalTransferSubmit} className="p-6 space-y-4">
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">¿De dónde sale y a dónde va?</h4>
-                          <div className="space-y-3">
-                              <div>
-                                  <label className="block text-xs font-semibold text-slate-600 mb-1">Sale de (Origen)</label>
-                                  <select value={transferIntFrom} onChange={(e) => setTransferIntFrom(e.target.value)} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold">
-                                    {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
-                                  </select>
-                              </div>
-                              <div className="flex justify-center text-indigo-300 my-1"><i className="fas fa-arrow-down"></i></div>
-                              <div>
-                                  <label className="block text-xs font-semibold text-slate-600 mb-1">Entra a (Destino)</label>
-                                  <select value={transferIntTo} onChange={(e) => setTransferIntTo(e.target.value)} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold">
-                                    {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
-                                  </select>
-                              </div>
-                          </div>
-                      </div>
-
-                      <div>
-                          <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Monto a traspasar (ARS)</label>
-                          <input 
-                            type="text" 
-                            inputMode="numeric"
-                            value={transferIntAmount ? Number(transferIntAmount).toLocaleString('es-AR') : ''} 
-                            onChange={(e) => setTransferIntAmount(e.target.value.replace(/\D/g, ''))} 
-                            placeholder="0" 
-                            className="w-full p-3 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-xl text-indigo-700" 
-                            required 
-                          />
-                      </div>
-
-                      <div>
-                          <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Fecha</label>
-                          <input 
-                            type="date" 
-                            value={transferIntDate} 
-                            onChange={(e) => setTransferIntDate(e.target.value)} 
-                            className="w-full p-3 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-medium" 
-                            required 
-                          />
-                      </div>
-
-                      <div className="flex gap-3 pt-2">
-                        <button type="button" onClick={() => setInternalTransferModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-700 font-bold rounded-lg hover:bg-slate-200 transition-colors">Cancelar</button>
-                        <button type="submit" className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors">Confirmar Traspaso</button>
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              )}
-
               {/* MODAL TRANSFERENCIA A BÓVEDA */}
               {transferModal && (
                 <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
@@ -1676,6 +1752,72 @@
                       <div className="flex gap-3 pt-2">
                         <button type="button" onClick={() => setTransferModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-700 font-bold rounded-lg hover:bg-slate-200 transition-colors">Cancelar</button>
                         <button type="submit" className="flex-1 py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-lg transition-colors">Confirmar Envío</button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* MODAL TRASPASO INTERNO (PASAR PLATA) */}
+              {internalTransferModal && (
+                <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+                  <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden">
+                    <div className="p-4 flex justify-between items-center bg-indigo-600 text-white">
+                      <h3 className="font-bold flex items-center gap-2">
+                        <i className="fas fa-right-left text-xl"></i> Paso de Plata
+                      </h3>
+                      <button onClick={() => setInternalTransferModal(false)} className="text-white/80 hover:text-white bg-transparent p-1 rounded-full hover:bg-white/20 transition-colors">
+                        <i className="fas fa-xmark text-xl"></i>
+                      </button>
+                    </div>
+                    
+                    <form onSubmit={handleInternalTransferSubmit} className="p-6 space-y-4">
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-3 flex items-center gap-2">¿De dónde sale y a dónde va?</h4>
+                          <div className="space-y-3">
+                              <div>
+                                  <label className="block text-xs font-semibold text-slate-600 mb-1">Sale de (Origen)</label>
+                                  <select value={transferIntFrom} onChange={(e) => setTransferIntFrom(e.target.value)} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold">
+                                    {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                                  </select>
+                              </div>
+                              <div className="flex justify-center text-indigo-300 my-1"><i className="fas fa-arrow-down"></i></div>
+                              <div>
+                                  <label className="block text-xs font-semibold text-slate-600 mb-1">Entra a (Destino)</label>
+                                  <select value={transferIntTo} onChange={(e) => setTransferIntTo(e.target.value)} className="w-full p-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold">
+                                    {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                                  </select>
+                              </div>
+                          </div>
+                      </div>
+
+                      <div>
+                          <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Monto a traspasar (ARS)</label>
+                          <input 
+                            type="text" 
+                            inputMode="numeric"
+                            value={transferIntAmount ? Number(transferIntAmount).toLocaleString('es-AR') : ''} 
+                            onChange={(e) => setTransferIntAmount(e.target.value.replace(/\D/g, ''))} 
+                            placeholder="0" 
+                            className="w-full p-3 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-xl text-indigo-700" 
+                            required 
+                          />
+                      </div>
+
+                      <div>
+                          <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Fecha</label>
+                          <input 
+                            type="date" 
+                            value={transferIntDate} 
+                            onChange={(e) => setTransferIntDate(e.target.value)} 
+                            className="w-full p-3 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-medium" 
+                            required 
+                          />
+                      </div>
+
+                      <div className="flex gap-3 pt-2">
+                        <button type="button" onClick={() => setInternalTransferModal(false)} className="flex-1 py-3 bg-slate-100 text-slate-700 font-bold rounded-lg hover:bg-slate-200 transition-colors">Cancelar</button>
+                        <button type="submit" className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition-colors">Confirmar Traspaso</button>
                       </div>
                     </form>
                   </div>
@@ -1784,11 +1926,121 @@
                 </div>
               )}
 
+              {/* GRÁFICO DE EVOLUCIÓN PERSONALIZADO INYECTADO */}
+              {activeTab === 'reporte' && (
+                <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mt-6">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                <i className="fas fa-chart-line text-indigo-500"></i> Evolución Mensual Personalizada
+                            </h3>
+                            <p className="text-xs text-slate-500 mt-1">Compará hasta 3 variables a lo largo de los últimos 6 meses.</p>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col md:flex-row gap-4 items-end mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                        <div className="flex-1 w-full">
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo</label>
+                            <select value={newLineType} onChange={(e) => { setNewLineType(e.target.value); setNewLineCategory('all'); }} className="w-full p-2 bg-white border border-slate-300 rounded-lg outline-none text-sm font-bold text-slate-700">
+                                <option value="all">Todos</option>
+                                {Object.keys(STRUCTURE).map(t => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
+                            </select>
+                        </div>
+                        <div className="flex-1 w-full">
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Categoría</label>
+                            <select value={newLineCategory} onChange={(e) => setNewLineCategory(e.target.value)} className="w-full p-2 bg-white border border-slate-300 rounded-lg outline-none text-sm font-bold text-slate-700" disabled={newLineType === 'all'}>
+                                <option value="all">Todas</option>
+                                {availableChartCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        </div>
+                        <div className="flex-1 w-full">
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Medio de Pago</label>
+                            <select value={newLineMethod} onChange={(e) => setNewLineMethod(e.target.value)} className="w-full p-2 bg-white border border-slate-300 rounded-lg outline-none text-sm font-bold text-slate-700">
+                                <option value="all">Todos</option>
+                                {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                        </div>
+                        <button onClick={addChartLine} disabled={chartLines.length >= 3} className="w-full md:w-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold rounded-lg transition-colors text-sm">
+                            Sumar al gráfico
+                        </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 mb-6 min-h-[32px]">
+                        {chartLines.map((line) => (
+                            <div key={line.id} className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border" style={{ backgroundColor: `${line.color}15`, borderColor: line.color, color: line.color }}>
+                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }}></div>
+                                {line.label}
+                                <button onClick={() => removeChartLine(line.id)} className="ml-1 opacity-60 hover:opacity-100"><i className="fas fa-times"></i></button>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="w-full overflow-x-auto">
+                        <div className="min-w-[600px] h-[300px]">
+                            <svg viewBox="0 0 800 300" className="w-full h-full">
+                                {[0, 0.25, 0.5, 0.75, 1].map(pct => {
+                                    const y = 260 - (pct * 240);
+                                    const safeMax = Math.max(chartData.maxVal, 100);
+                                    const val = safeMax * pct;
+                                    return (
+                                        <g key={pct}>
+                                            <line x1="60" y1={y} x2="780" y2={y} stroke="#e2e8f0" strokeDasharray="4 4" />
+                                            <text x="50" y={y + 4} textAnchor="end" className="text-[10px] fill-slate-400 font-medium">
+                                                {val >= 1000 ? `${(val/1000).toFixed(0)}k` : Math.round(val)}
+                                            </text>
+                                        </g>
+                                    )
+                                })}
+                                
+                                {chartData.months.map((m, i) => {
+                                    const divisor = Math.max(1, chartData.months.length - 1);
+                                    const x = 80 + (i * (700 / divisor));
+                                    const [year, month] = m.split('-');
+                                    const monthName = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'][parseInt(month)-1];
+                                    return (
+                                        <g key={m}>
+                                            <text x={x} y="285" textAnchor="middle" className="text-xs fill-slate-500 font-bold">{monthName} {year.slice(-2)}</text>
+                                        </g>
+                                    )
+                                })}
+                                
+                                {chartData.lines.map(line => {
+                                    const safeMax = Math.max(chartData.maxVal, 100);
+                                    const divisor = Math.max(1, chartData.months.length - 1);
+                                    const points = line.dataPoints.map((val, i) => {
+                                        const x = 80 + (i * (700 / divisor));
+                                        const y = 260 - ((val / safeMax) * 240);
+                                        return `${x},${y}`;
+                                    }).join(' L ');
+                                    
+                                    return (
+                                        <g key={line.id}>
+                                            <path d={`M ${points}`} fill="none" stroke={line.color} strokeWidth="3" />
+                                            {line.dataPoints.map((val, i) => {
+                                                const x = 80 + (i * (700 / divisor));
+                                                const y = 260 - ((val / safeMax) * 240);
+                                                return (
+                                                    <circle key={i} cx={x} cy={y} r="4" fill="white" stroke={line.color} strokeWidth="2" className="cursor-pointer transition-all hover:r-6">
+                                                        <title>{`${line.label} en ${chartData.months[i]}: $${val.toLocaleString('es-AR')}`}</title>
+                                                    </circle>
+                                                )
+                                            })}
+                                        </g>
+                                    )
+                                })}
+                                {chartLines.length === 0 && (
+                                    <text x="400" y="150" textAnchor="middle" className="text-sm fill-slate-400 font-bold">Seleccioná variables arriba para armar el gráfico (Max 3)</text>
+                                )}
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+              )}
+
             </div>
           );
         }
 
-        // SISTEMA DE PREVENCIÓN DE PANTALLA BLANCA (Error Boundary)
         class ErrorBoundary extends React.Component {
           constructor(props) {
             super(props);
@@ -1812,7 +2064,6 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         const renderApp = () => root.render(<ErrorBoundary><App /></ErrorBoundary>);
         
-        // Iniciador 100% a prueba de fallos
         const startApp = () => {
             if (window.Firebase) {
                 renderApp();
