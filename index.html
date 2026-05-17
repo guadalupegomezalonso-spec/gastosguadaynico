@@ -60,15 +60,14 @@
         };
 
         const STRUCTURE = {
-          ingreso: ['Sueldo Nico', 'Sueldo Guada', 'Reintegro Catamarca'],
+          ingreso: ['Sueldo Nico', 'Sueldo Guada'],
           pago_tarjetas: ['Tarjeta Nico', 'Tarjeta Guada', 'Naranja Nico', 'Naranja Guada'],
           gastos_casa: ['Expensas casa', 'Expensas terreno', 'Luz', 'Agua', 'Mirta', 'Piletero', 'Jardinero', 'Crédito auto', 'Crédito Hipotecario'],
           gastos_diarios: ['Verdulería', 'Carnicería', 'Super/almacén', 'Delivery', 'Nafta', 'Comidas afuera/salidas', 'Salidas con amigos/flia', 'Regalos', 'Remedios/farmacia/suplementos', 'Dentista/medico', 'Peluquería/manos/depilación', 'Veterinario', 'Psicóloga', 'Otros'],
           ahorro: ['Envío a Bóveda'],
-          transferencia: ['Paso de Plata'], // Agregado para permitir traspasos internos
-          catamarca: ['Super/almacén/comida', 'Nafta', 'Gastos Casa', 'Delivery', 'Kiosco', 'Otros']
+          transferencia: ['Paso de Plata']
         };
-        const TYPE_LABELS = { ingreso: 'Ingreso', pago_tarjetas: 'Pago tarjetas', gastos_casa: 'Pagos casa', gastos_diarios: 'Gastos diarios', ahorro: 'Ahorro / Inversión', transferencia: 'Pasos de Plata', catamarca: 'Catamarca' };
+        const TYPE_LABELS = { ingreso: 'Ingreso', pago_tarjetas: 'Pago tarjetas', gastos_casa: 'Pagos casa', gastos_diarios: 'Gastos diarios', ahorro: 'Ahorro / Inversión', transferencia: 'Pasos de Plata' };
         
         const CHART_COLORS = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'];
 
@@ -83,16 +82,14 @@
           const [savingsAmount, setSavingsAmount] = useState('');
           const [savingsReason, setSavingsReason] = useState('');
           const [historyModal, setHistoryModal] = useState({ isOpen: false, boxId: '', accounts: [] });
-          const [incomeModalOpen, setIncomeModalOpen] = useState(false); // Modal Historial de Ingresos
+          const [incomeModalOpen, setIncomeModalOpen] = useState(false);
 
-          // Modal Transferencia a Bóveda
           const [transferModal, setTransferModal] = useState(false);
           const [transferFrom, setTransferFrom] = useState(PAYMENT_METHODS[0]);
           const [transferTo, setTransferTo] = useState(SAVINGS_ACCOUNTS[0]);
           const [transferAmountOut, setTransferAmountOut] = useState('');
           const [transferAmountIn, setTransferAmountIn] = useState('');
 
-          // Modal Traspaso Interno (Pasar Plata)
           const [internalTransferModal, setInternalTransferModal] = useState(false);
           const [transferIntFrom, setTransferIntFrom] = useState(PAYMENT_METHODS[0]);
           const [transferIntTo, setTransferIntTo] = useState(PAYMENT_METHODS[1]);
@@ -107,7 +104,6 @@
           const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
           const [person, setPerson] = useState('Guada');
 
-          // Estados Préstamo Campo
           const [campoType, setCampoType] = useState('le_presto');
           const [campoAmount, setCampoAmount] = useState('');
           const [campoMethod, setCampoMethod] = useState(PAYMENT_METHODS[0]);
@@ -117,25 +113,22 @@
           const currentMonthString = new Date().toISOString().substring(0, 7);
           const [filterMonth, setFilterMonth] = useState(currentMonthString);
           const [filterType, setFilterType] = useState('all');
-          const [filterCategory, setFilterCategory] = useState('all'); // NUEVO ESTADO PARA EL FILTRO DE CATEGORÍAS
-          const [filterPerson, setFilterPerson] = useState('all'); // NUEVO ESTADO PARA EL FILTRO DE PERSONA
-          const [filterExactDate, setFilterExactDate] = useState(''); // NUEVO ESTADO PARA EL FILTRO DE FECHA EXACTA
+          const [filterCategory, setFilterCategory] = useState('all'); 
+          const [filterPerson, setFilterPerson] = useState('all'); 
+          const [filterExactDate, setFilterExactDate] = useState(''); 
           
           const [errorMsg, setErrorMsg] = useState('');
           const [user, setUser] = useState(null);
           const [isDbConnected, setIsDbConnected] = useState(false);
 
-          // Estado para Edición de Presupuestos
           const [editingBudget, setEditingBudget] = useState(false);
           const [budgetForm, setBudgetForm] = useState({ pago_tarjetas: 0, gastos_casa: 0, gastos_diarios: 0 });
 
-          // NUEVOS ESTADOS: Gráfico de Evolución Mensual
           const [chartLines, setChartLines] = useState([]);
           const [newLineType, setNewLineType] = useState('all');
           const [newLineCategory, setNewLineCategory] = useState('all');
           const [newLineMethod, setNewLineMethod] = useState('all');
 
-          // CONFIGURACIÓN DE FIREBASE
           const dbConfig = useMemo(() => {
             if (!window.Firebase) return null;
             const { initializeApp, getApps, getApp, getAuth, getFirestore } = window.Firebase;
@@ -158,7 +151,6 @@
             } catch (e) { return null; }
           }, []);
 
-          // AUTENTICACIÓN Y LECTURA DE DATOS
           useEffect(() => {
             if (!dbConfig) return;
             const { signInWithCustomToken, signInAnonymously, onAuthStateChanged } = window.Firebase;
@@ -202,7 +194,14 @@
               setBudgets(data);
             }, (err) => console.error(err));
 
-            return () => { unsubTx(); unsubSav(); unsubCam(); unsubBud(); };
+            const setRef = doc(dbConfig.db, 'artifacts', appId, 'public', 'data', 'settings', 'general');
+            const unsubSet = onSnapshot(setRef, (docSnap) => {
+              if (docSnap.exists()) {
+                setReservedCash(docSnap.data().reservedCash || 0);
+              }
+            }, (err) => console.error(err));
+
+            return () => { unsubTx(); unsubSav(); unsubCam(); unsubBud(); unsubSet(); };
           }, [user, dbConfig]);
 
           useEffect(() => {
@@ -220,7 +219,7 @@
             setTimeout(() => setErrorMsg(''), 4000);
           }
 
-          // LÓGICA PARA EL GRÁFICO DE EVOLUCIÓN
+          // LÓGICA PARA EL GRÁFICO DE EVOLUCIÓN CON EJES DINÁMICOS
           const availableMonthsAll = useMemo(() => {
             const m = [...new Set(transactions.map(t => t.date ? t.date.substring(0, 7) : null).filter(Boolean))];
             if (!m.includes(currentMonthString)) m.push(currentMonthString);
@@ -234,7 +233,7 @@
 
           const chartData = useMemo(() => {
               const plotMonths = [...availableMonthsAll].slice(0, 6).reverse(); // Últimos 6 meses
-              if (plotMonths.length === 0) return { months: [], lines: [], maxVal: 100 };
+              if (plotMonths.length === 0) return { months: [], lines: [], maxVal: 100, minVal: 0 };
 
               let allTx = [];
               transactions.forEach(t => allTx.push({...t, safeType: t.type}));
@@ -259,12 +258,26 @@
                   return { ...line, color, dataPoints };
               });
 
-              const maxVal = Math.max(...linesData.flatMap(l => l.dataPoints), 100);
-              return { months: plotMonths, lines: linesData, maxVal };
+              let maxVal = 100;
+              let minVal = 0;
+              const allValues = linesData.flatMap(l => l.dataPoints);
+              
+              if (allValues.length > 0) {
+                  const currentMax = Math.max(...allValues);
+                  const currentMin = Math.min(...allValues);
+                  maxVal = currentMax > 0 ? currentMax * 1.15 : 100; // 15% de margen superior para las etiquetas
+                  minVal = currentMin < 0 ? currentMin * 1.1 : 0;
+                  
+                  if (maxVal === minVal) {
+                      maxVal = minVal + 100;
+                  }
+              }
+
+              return { months: plotMonths, lines: linesData, maxVal, minVal };
           }, [transactions, chartLines, availableMonthsAll]);
 
           const addChartLine = () => {
-              if (chartLines.length >= 3) return;
+              if (chartLines.length >= 5) return;
               const newId = `${newLineType}-${newLineCategory}-${newLineMethod}-${Date.now()}`;
               
               let labelParts = [];
@@ -280,39 +293,28 @@
               setChartLines(chartLines.filter(l => l.id !== id));
           };
 
-          // Historial Unificado para el Flujo Diario (Transactions + Campo + Savings)
+          const formatChartVal = (val) => {
+              if (val === 0) return '0';
+              if (Math.abs(val) >= 1000000) return (val / 1000000).toFixed(1) + 'M';
+              if (Math.abs(val) >= 1000) return (val / 1000).toFixed(1) + 'k';
+              return Math.round(val).toString();
+          };
+
           const unifiedHistory = useMemo(() => {
             let combined = [];
 
-            // 1. Transacciones normales (Gastos, Ingresos, Transferencias)
-            transactions.forEach(t => {
-                combined.push({ ...t, dbCollection: 'transactions' });
-            });
-
-            // 2. Movimientos del Campo
+            transactions.forEach(t => { combined.push({ ...t, dbCollection: 'transactions' }); });
             campoTx.forEach(t => {
                 combined.push({
-                    ...t,
-                    dbCollection: 'campo',
-                    category: t.type === 'le_presto' ? 'Préstamo al Campo' : 'Ingreso del Campo',
-                    person: 'Ambos'
+                    ...t, dbCollection: 'campo', category: t.type === 'le_presto' ? 'Préstamo al Campo' : 'Ingreso del Campo', person: 'Ambos'
                 });
             });
-
-            // 3. Movimientos manuales de Ahorro (Bóveda)
             savingsTx.forEach(t => {
                 combined.push({
-                    ...t,
-                    dbCollection: 'savings',
-                    category: 'Movimiento Bóveda',
-                    paymentMethod: t.account,
-                    description: t.reason,
-                    person: 'Ambos',
-                    type: t.type === 'in' ? 'ahorro_in' : 'ahorro_out'
+                    ...t, dbCollection: 'savings', category: 'Movimiento Bóveda', paymentMethod: t.account, description: t.reason, person: 'Ambos', type: t.type === 'in' ? 'ahorro_in' : 'ahorro_out'
                 });
             });
 
-            // Filtrado
             return combined.filter(t => {
                 const safeDate = t.date || '';
                 const matchMonth = filterMonth === 'all' || safeDate.substring(0, 7) === filterMonth;
@@ -346,7 +348,6 @@
             });
           }, [transactions, campoTx, savingsTx, filterMonth, filterType, filterCategory, filterPerson, filterExactDate]);
 
-          // Generar lista de categorías disponibles según el tipo seleccionado
           const availableFilterCategories = useMemo(() => {
               if (filterType === 'all') return [];
               if (filterType === 'campo') return ['Préstamo al Campo', 'Ingreso del Campo'];
@@ -377,9 +378,7 @@
               if (t.type === 'ingreso') {
                   bals[method] += Number(t.amount || 0);
               } else if (t.type === 'transferencia') {
-                  // Sale plata del origen
                   bals[method] -= Number(t.amount || 0);
-                  // Entra plata al destino
                   const dest = t.transferTo;
                   if (bals[dest] === undefined) bals[dest] = 0;
                   bals[dest] += Number(t.amount || 0);
@@ -387,12 +386,11 @@
                   bals[method] -= Number(t.amount || 0);
               }
             });
-            // Impacto de los préstamos del campo en nuestros saldos reales
             campoTx.forEach(tx => {
               const method = tx.paymentMethod || 'Efectivo';
               if (bals[method] === undefined) bals[method] = 0;
-              if (tx.type === 'le_presto') bals[method] -= Number(tx.amount || 0); // Sale plata nuestra
-              else if (tx.type === 'me_presta') bals[method] += Number(tx.amount || 0); // Entra plata a nuestra cuenta
+              if (tx.type === 'le_presto') bals[method] -= Number(tx.amount || 0);
+              else if (tx.type === 'me_presta') bals[method] += Number(tx.amount || 0);
             });
             return bals;
           }, [transactions, campoTx]);
@@ -417,9 +415,7 @@
             const totalsByType = { pago_tarjetas: 0, gastos_casa: 0, gastos_diarios: 0, ahorro: 0 };
             let totalIngresos = 0;
             let totalGastos = 0;
-            let totalCatamarca = 0;
             const topDiarios = {};
-            const catamarcaBreakdown = {};
 
             const prevMonth = getPrevMonth(filterMonth);
             const prevTotals = { pago_tarjetas: 0, gastos_casa: 0, gastos_diarios: 0 };
@@ -431,10 +427,7 @@
               if (filterMonth === 'all' || tMonth === filterMonth) {
                 if (t.type === 'ingreso') {
                     totalIngresos += Number(t.amount || 0);
-                } else if (t.type === 'catamarca') {
-                    totalCatamarca += Number(t.amount || 0);
-                    catamarcaBreakdown[t.category] = (catamarcaBreakdown[t.category] || 0) + Number(t.amount || 0);
-                } else if (t.type !== 'transferencia') { // Ignoramos traspasos internos porque no son gastos ni ingresos
+                } else if (t.type !== 'transferencia') { 
                   const typeSafe = t.type || 'gastos_diarios';
                   totalsByType[typeSafe] = (totalsByType[typeSafe] || 0) + Number(t.amount || 0);
                   if (typeSafe !== 'ahorro') totalGastos += Number(t.amount || 0);
@@ -450,10 +443,9 @@
             });
 
             const sortedDiarios = Object.entries(topDiarios).sort(([, a], [, b]) => b - a).slice(0, 8);
-            const sortedCatamarca = Object.entries(catamarcaBreakdown).sort(([, a], [, b]) => b - a);
             const capacityToSave = totalIngresos - totalGastos;
             
-            return { totalIngresos, totalGastos, totalCatamarca, totalsByType, sortedDiarios, sortedCatamarca, capacityToSave, prevTotals };
+            return { totalIngresos, totalGastos, totalsByType, sortedDiarios, capacityToSave, prevTotals };
           }, [transactions, filterMonth]);
 
           const mandatoryChecklist = useMemo(() => {
@@ -465,7 +457,6 @@
             transactions.forEach(t => {
               const safeDate = t.date || '';
               const matchMonth = filterMonth === 'all' || (safeDate && safeDate.substring(0, 7) === filterMonth);
-              
               if (matchMonth && t.category && checklist[t.category] !== undefined) {
                 checklist[t.category] = true;
               }
@@ -485,7 +476,6 @@
             return balances;
           }, [savingsTx]);
 
-          // GUARDADO EN LA NUBE Y ELIMINACIÓN UNIFICADA
           const handleSubmit = async (e) => {
             e.preventDefault();
             if (!amount || Number(amount) <= 0) return;
@@ -516,7 +506,6 @@
             else if (collectionName === 'savings') await deleteSavingsTransaction(id);
           };
 
-          // GUARDADO TRASPASO INTERNO (PASAR PLATA)
           const openInternalTransferModal = () => {
             setInternalTransferModal(true);
             setTransferIntAmount('');
@@ -543,8 +532,8 @@
                 type: 'transferencia', 
                 category: 'Paso de Plata', 
                 amount: numAmount, 
-                paymentMethod: transferIntFrom, // de donde sale
-                transferTo: transferIntTo,     // a donde entra
+                paymentMethod: transferIntFrom,
+                transferTo: transferIntTo,
                 description: `De ${transferIntFrom} a ${transferIntTo}`, 
                 date: transferIntDate, 
                 person: 'Ambos', 
@@ -561,7 +550,6 @@
             setInternalTransferModal(false);
           };
 
-          // GUARDADO CAMPO
           const handleCampoSubmit = async (e) => {
             e.preventDefault();
             if (!campoAmount || Number(campoAmount) <= 0) return;
@@ -705,7 +693,6 @@
             if (txType === 'ahorro') return <i className="fas fa-piggy-bank text-xl opacity-80"></i>;
             if (txType === 'le_presto') return <i className="fas fa-tractor text-xl opacity-80"></i>;
             if (txType === 'transferencia') return <i className="fas fa-right-left text-xl opacity-80"></i>;
-            if (txType === 'catamarca') return <i className="fas fa-briefcase text-xl opacity-80"></i>;
             if (txType === 'ahorro_in') return <i className="fas fa-circle-arrow-down text-xl opacity-80"></i>;
             if (txType === 'ahorro_out') return <i className="fas fa-circle-arrow-up text-xl opacity-80"></i>;
             return <i className="fas fa-bag-shopping text-xl opacity-80"></i>;
@@ -718,7 +705,6 @@
             if (txType === 'ahorro' || txType === 'ahorro_in') return 'bg-teal-100 text-teal-600';
             if (txType === 'le_presto') return 'bg-amber-100 text-amber-600';
             if (txType === 'transferencia') return 'bg-indigo-100 text-indigo-600';
-            if (txType === 'catamarca') return 'bg-cyan-100 text-cyan-700';
             if (txType === 'ahorro_out') return 'bg-rose-100 text-rose-600';
             return 'bg-rose-100 text-rose-600';
           };
@@ -1004,49 +990,14 @@
                       )}
                     </div>
 
-                    {/* NUEVO BLOQUE: GASTOS A REINTEGRAR CATAMARCA */}
-                    <div className="bg-cyan-50 rounded-2xl p-6 shadow-sm border border-cyan-200 mt-6">
-                      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-                        <div>
-                          <h3 className="text-sm font-bold text-cyan-900 uppercase tracking-wider flex items-center gap-2">
-                            <i className="fas fa-briefcase text-cyan-600"></i> Gastos a reintegrar Catamarca
-                          </h3>
-                          <p className="text-xs text-cyan-700 mt-1">Plata gastada por Nico para el trabajo que debe ser devuelta.</p>
-                        </div>
-                        <div className="text-right w-full md:w-auto bg-white/60 p-3 rounded-xl border border-cyan-200">
-                           <span className="text-xs font-bold text-cyan-800 uppercase tracking-wider block">Total a cobrar este mes</span>
-                           <span className="text-3xl font-black text-cyan-700">{formatARS(reportStats.totalCatamarca)}</span>
-                        </div>
-                      </div>
-                      
-                      {reportStats.sortedCatamarca.length === 0 ? (
-                        <div className="text-center text-cyan-600/50 py-4 font-medium">No hay gastos de Catamarca registrados este mes.</div>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                          {reportStats.sortedCatamarca.map(([cat, amount]) => {
-                            const pct = reportStats.totalCatamarca > 0 ? Math.round((amount / reportStats.totalCatamarca) * 100) : 0;
-                            return (
-                              <div key={cat} className="bg-white rounded-xl p-4 shadow-sm border border-cyan-100 flex justify-between items-center">
-                                  <div>
-                                    <span className="font-bold text-slate-700 block text-sm">{cat}</span>
-                                    <span className="text-xs font-bold text-cyan-500">{pct}% del total</span>
-                                  </div>
-                                  <span className="font-black text-cyan-700 text-lg">{formatARS(amount)}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* GRÁFICO DE EVOLUCIÓN PERSONALIZADO */}
+                    {/* GRÁFICO DE EVOLUCIÓN PERSONALIZADO (ÚNICO Y CON EJES DINÁMICOS) */}
                     <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mt-6">
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
                             <div>
                                 <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                                     <i className="fas fa-chart-line text-indigo-500"></i> Evolución Mensual Personalizada
                                 </h3>
-                                <p className="text-xs text-slate-500 mt-1">Compará hasta 3 variables a lo largo de los últimos 6 meses.</p>
+                                <p className="text-xs text-slate-500 mt-1">Compará hasta 5 variables a lo largo de los últimos 6 meses.</p>
                             </div>
                         </div>
 
@@ -1054,33 +1005,33 @@
                         <div className="flex flex-col md:flex-row gap-4 items-end mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
                             <div className="flex-1 w-full">
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo</label>
-                                <select value={newLineType} onChange={(e) => { setNewLineType(e.target.value); setNewLineCategory('all'); }} className="w-full p-2 bg-white border border-slate-300 rounded-lg outline-none text-sm">
+                                <select value={newLineType} onChange={(e) => { setNewLineType(e.target.value); setNewLineCategory('all'); }} className="w-full p-2 bg-white border border-slate-300 rounded-lg outline-none text-sm font-bold text-slate-700">
                                     <option value="all">Todos</option>
                                     {Object.keys(STRUCTURE).map(t => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
                                 </select>
                             </div>
                             <div className="flex-1 w-full">
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Categoría</label>
-                                <select value={newLineCategory} onChange={(e) => setNewLineCategory(e.target.value)} className="w-full p-2 bg-white border border-slate-300 rounded-lg outline-none text-sm" disabled={newLineType === 'all'}>
+                                <select value={newLineCategory} onChange={(e) => setNewLineCategory(e.target.value)} className="w-full p-2 bg-white border border-slate-300 rounded-lg outline-none text-sm font-bold text-slate-700" disabled={newLineType === 'all'}>
                                     <option value="all">Todas</option>
                                     {availableChartCategories.map(c => <option key={c} value={c}>{c}</option>)}
                                 </select>
                             </div>
                             <div className="flex-1 w-full">
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Medio de Pago</label>
-                                <select value={newLineMethod} onChange={(e) => setNewLineMethod(e.target.value)} className="w-full p-2 bg-white border border-slate-300 rounded-lg outline-none text-sm">
+                                <select value={newLineMethod} onChange={(e) => setNewLineMethod(e.target.value)} className="w-full p-2 bg-white border border-slate-300 rounded-lg outline-none text-sm font-bold text-slate-700">
                                     <option value="all">Todos</option>
                                     {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
                                 </select>
                             </div>
-                            <button onClick={addChartLine} disabled={chartLines.length >= 3} className="w-full md:w-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold rounded-lg transition-colors text-sm">
+                            <button onClick={addChartLine} disabled={chartLines.length >= 5} className="w-full md:w-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold rounded-lg transition-colors text-sm">
                                 Sumar al gráfico
                             </button>
                         </div>
 
                         {/* Badges */}
-                        <div className="flex flex-wrap gap-2 mb-6">
-                            {chartLines.map((line, idx) => (
+                        <div className="flex flex-wrap gap-2 mb-6 min-h-[32px]">
+                            {chartLines.map((line) => (
                                 <div key={line.id} className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border" style={{ backgroundColor: `${line.color}15`, borderColor: line.color, color: line.color }}>
                                     <div className="w-2 h-2 rounded-full" style={{ backgroundColor: line.color }}></div>
                                     {line.label}
@@ -1089,27 +1040,42 @@
                             ))}
                         </div>
 
-                        {/* SVG Chart */}
+                        {/* SVG Chart con Valores y Escalado Dinámico */}
                         <div className="w-full overflow-x-auto">
                             <div className="min-w-[600px] h-[300px]">
                                 <svg viewBox="0 0 800 300" className="w-full h-full">
-                                    {/* Grilla y Eje Y */}
+                                    {/* Grilla y Eje Y Dinámico */}
                                     {[0, 0.25, 0.5, 0.75, 1].map(pct => {
+                                        const rangeVal = chartData.maxVal - chartData.minVal || 1;
                                         const y = 260 - (pct * 240);
-                                        const safeMax = Math.max(chartData.maxVal, 100);
-                                        const val = safeMax * pct;
+                                        const val = chartData.minVal + (pct * rangeVal);
                                         return (
                                             <g key={pct}>
                                                 <line x1="60" y1={y} x2="780" y2={y} stroke="#e2e8f0" strokeDasharray="4 4" />
-                                                <text x="50" y={y + 4} textAnchor="end" className="text-[10px] fill-slate-400 font-medium">
-                                                    {val >= 1000 ? `${(val/1000).toFixed(0)}k` : Math.round(val)}
-                                                </text>
+                                                {chartLines.length > 0 && (
+                                                  <text x="50" y={y + 4} textAnchor="end" className="text-[10px] fill-slate-400 font-medium">
+                                                      {formatChartVal(val)}
+                                                  </text>
+                                                )}
                                             </g>
                                         )
                                     })}
+                                    
+                                    {/* Línea Cero si hay valores negativos */}
+                                    {chartData.minVal < 0 && chartLines.length > 0 && (
+                                        <line 
+                                            x1="60" 
+                                            y1={260 - (((0 - chartData.minVal) / (chartData.maxVal - chartData.minVal || 1)) * 240)}
+                                            x2="780" 
+                                            y2={260 - (((0 - chartData.minVal) / (chartData.maxVal - chartData.minVal || 1)) * 240)}
+                                            stroke="#cbd5e1" strokeWidth="2" 
+                                        />
+                                    )}
+
                                     {/* Eje X */}
                                     {chartData.months.map((m, i) => {
-                                        const x = 80 + (i * (700 / Math.max(1, chartData.months.length - 1)));
+                                        const divisor = Math.max(1, chartData.months.length - 1);
+                                        const x = 80 + (i * (700 / divisor));
                                         const [year, month] = m.split('-');
                                         const monthName = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'][parseInt(month)-1];
                                         return (
@@ -1118,12 +1084,14 @@
                                             </g>
                                         )
                                     })}
-                                    {/* Líneas */}
+                                    
+                                    {/* Líneas de datos y Valores sobre los puntos */}
                                     {chartData.lines.map(line => {
-                                        const safeMax = Math.max(chartData.maxVal, 100);
+                                        const range = chartData.maxVal - chartData.minVal || 1;
+                                        const divisor = Math.max(1, chartData.months.length - 1);
                                         const points = line.dataPoints.map((val, i) => {
-                                            const x = 80 + (i * (700 / Math.max(1, chartData.months.length - 1)));
-                                            const y = 260 - ((val / safeMax) * 240);
+                                            const x = 80 + (i * (700 / divisor));
+                                            const y = 260 - (((val - chartData.minVal) / range) * 240);
                                             return `${x},${y}`;
                                         }).join(' L ');
                                         
@@ -1131,19 +1099,24 @@
                                             <g key={line.id}>
                                                 <path d={`M ${points}`} fill="none" stroke={line.color} strokeWidth="3" opacity="0.8" strokeLinecap="round" strokeLinejoin="round" />
                                                 {line.dataPoints.map((val, i) => {
-                                                    const x = 80 + (i * (700 / Math.max(1, chartData.months.length - 1)));
-                                                    const y = 260 - ((val / safeMax) * 240);
+                                                    const x = 80 + (i * (700 / divisor));
+                                                    const y = 260 - (((val - chartData.minVal) / range) * 240);
                                                     return (
-                                                        <circle key={i} cx={x} cy={y} r="4" fill="white" stroke={line.color} strokeWidth="2" className="cursor-pointer transition-all duration-200">
-                                                            <title>{`${line.label} en ${chartData.months[i]}: $${val.toLocaleString('es-AR')}`}</title>
-                                                        </circle>
+                                                        <g key={i}>
+                                                            <circle cx={x} cy={y} r="4" fill="white" stroke={line.color} strokeWidth="2" className="cursor-pointer transition-all hover:r-6">
+                                                                <title>{`${line.label} en ${chartData.months[i]}: $${val.toLocaleString('es-AR')}`}</title>
+                                                            </circle>
+                                                            <text x={x} y={y - 12} textAnchor="middle" className="text-[10px] font-bold" fill={line.color}>
+                                                                {formatChartVal(val)}
+                                                            </text>
+                                                        </g>
                                                     );
                                                 })}
                                             </g>
                                         )
                                     })}
                                     {chartLines.length === 0 && (
-                                        <text x="400" y="150" textAnchor="middle" className="text-sm fill-slate-400">Seleccioná variables arriba para comparar (Max 3)</text>
+                                        <text x="400" y="150" textAnchor="middle" className="text-sm fill-slate-400 font-bold">Seleccioná variables arriba para armar el gráfico (Max 5)</text>
                                     )}
                                 </svg>
                             </div>
@@ -1926,7 +1899,7 @@
                 </div>
               )}
 
-              {/* GRÁFICO DE EVOLUCIÓN PERSONALIZADO INYECTADO */}
+              {/* GRÁFICO DE EVOLUCIÓN PERSONALIZADO (ÚNICO Y CON EJES DINÁMICOS) */}
               {activeTab === 'reporte' && (
                 <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mt-6">
                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
@@ -1934,10 +1907,11 @@
                             <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                                 <i className="fas fa-chart-line text-indigo-500"></i> Evolución Mensual Personalizada
                             </h3>
-                            <p className="text-xs text-slate-500 mt-1">Compará hasta 3 variables a lo largo de los últimos 6 meses.</p>
+                            <p className="text-xs text-slate-500 mt-1">Compará hasta 5 variables a lo largo de los últimos 6 meses.</p>
                         </div>
                     </div>
 
+                    {/* Controles */}
                     <div className="flex flex-col md:flex-row gap-4 items-end mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
                         <div className="flex-1 w-full">
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Tipo</label>
@@ -1960,11 +1934,12 @@
                                 {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
                             </select>
                         </div>
-                        <button onClick={addChartLine} disabled={chartLines.length >= 3} className="w-full md:w-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold rounded-lg transition-colors text-sm">
+                        <button onClick={addChartLine} disabled={chartLines.length >= 5} className="w-full md:w-auto px-6 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold rounded-lg transition-colors text-sm">
                             Sumar al gráfico
                         </button>
                     </div>
 
+                    {/* Badges */}
                     <div className="flex flex-wrap gap-2 mb-6 min-h-[32px]">
                         {chartLines.map((line) => (
                             <div key={line.id} className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border" style={{ backgroundColor: `${line.color}15`, borderColor: line.color, color: line.color }}>
@@ -1975,23 +1950,39 @@
                         ))}
                     </div>
 
+                    {/* SVG Chart con Valores y Escalado Dinámico */}
                     <div className="w-full overflow-x-auto">
                         <div className="min-w-[600px] h-[300px]">
                             <svg viewBox="0 0 800 300" className="w-full h-full">
+                                {/* Grilla y Eje Y Dinámico */}
                                 {[0, 0.25, 0.5, 0.75, 1].map(pct => {
+                                    const rangeVal = chartData.maxVal - chartData.minVal || 1;
                                     const y = 260 - (pct * 240);
-                                    const safeMax = Math.max(chartData.maxVal, 100);
-                                    const val = safeMax * pct;
+                                    const val = chartData.minVal + (pct * rangeVal);
                                     return (
                                         <g key={pct}>
                                             <line x1="60" y1={y} x2="780" y2={y} stroke="#e2e8f0" strokeDasharray="4 4" />
-                                            <text x="50" y={y + 4} textAnchor="end" className="text-[10px] fill-slate-400 font-medium">
-                                                {val >= 1000 ? `${(val/1000).toFixed(0)}k` : Math.round(val)}
-                                            </text>
+                                            {chartLines.length > 0 && (
+                                              <text x="50" y={y + 4} textAnchor="end" className="text-[10px] fill-slate-400 font-medium">
+                                                  {formatChartVal(val)}
+                                              </text>
+                                            )}
                                         </g>
                                     )
                                 })}
                                 
+                                {/* Línea Cero si hay valores negativos */}
+                                {chartData.minVal < 0 && chartLines.length > 0 && (
+                                    <line 
+                                        x1="60" 
+                                        y1={260 - (((0 - chartData.minVal) / (chartData.maxVal - chartData.minVal || 1)) * 240)}
+                                        x2="780" 
+                                        y2={260 - (((0 - chartData.minVal) / (chartData.maxVal - chartData.minVal || 1)) * 240)}
+                                        stroke="#cbd5e1" strokeWidth="2" 
+                                    />
+                                )}
+
+                                {/* Eje X */}
                                 {chartData.months.map((m, i) => {
                                     const divisor = Math.max(1, chartData.months.length - 1);
                                     const x = 80 + (i * (700 / divisor));
@@ -2004,32 +1995,38 @@
                                     )
                                 })}
                                 
+                                {/* Líneas de datos y Valores sobre los puntos */}
                                 {chartData.lines.map(line => {
-                                    const safeMax = Math.max(chartData.maxVal, 100);
+                                    const range = chartData.maxVal - chartData.minVal || 1;
                                     const divisor = Math.max(1, chartData.months.length - 1);
                                     const points = line.dataPoints.map((val, i) => {
                                         const x = 80 + (i * (700 / divisor));
-                                        const y = 260 - ((val / safeMax) * 240);
+                                        const y = 260 - (((val - chartData.minVal) / range) * 240);
                                         return `${x},${y}`;
                                     }).join(' L ');
                                     
                                     return (
                                         <g key={line.id}>
-                                            <path d={`M ${points}`} fill="none" stroke={line.color} strokeWidth="3" />
+                                            <path d={`M ${points}`} fill="none" stroke={line.color} strokeWidth="3" opacity="0.8" strokeLinecap="round" strokeLinejoin="round" />
                                             {line.dataPoints.map((val, i) => {
                                                 const x = 80 + (i * (700 / divisor));
-                                                const y = 260 - ((val / safeMax) * 240);
+                                                const y = 260 - (((val - chartData.minVal) / range) * 240);
                                                 return (
-                                                    <circle key={i} cx={x} cy={y} r="4" fill="white" stroke={line.color} strokeWidth="2" className="cursor-pointer transition-all hover:r-6">
-                                                        <title>{`${line.label} en ${chartData.months[i]}: $${val.toLocaleString('es-AR')}`}</title>
-                                                    </circle>
-                                                )
+                                                    <g key={i}>
+                                                        <circle cx={x} cy={y} r="4" fill="white" stroke={line.color} strokeWidth="2" className="cursor-pointer transition-all hover:r-6">
+                                                            <title>{`${line.label} en ${chartData.months[i]}: $${val.toLocaleString('es-AR')}`}</title>
+                                                        </circle>
+                                                        <text x={x} y={y - 12} textAnchor="middle" className="text-[10px] font-bold" fill={line.color}>
+                                                            {formatChartVal(val)}
+                                                        </text>
+                                                    </g>
+                                                );
                                             })}
                                         </g>
                                     )
                                 })}
                                 {chartLines.length === 0 && (
-                                    <text x="400" y="150" textAnchor="middle" className="text-sm fill-slate-400 font-bold">Seleccioná variables arriba para armar el gráfico (Max 3)</text>
+                                    <text x="400" y="150" textAnchor="middle" className="text-sm fill-slate-400 font-bold">Seleccioná variables arriba para armar el gráfico (Max 5)</text>
                                 )}
                             </svg>
                         </div>
